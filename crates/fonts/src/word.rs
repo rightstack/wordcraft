@@ -419,6 +419,9 @@ pub fn resolve(family: &str, bold: bool, italic: bool) -> Resolved {
     r
 }
 
+/// Line height factor for faces with a CJK code page (Lily patch 0002, measured).
+const CJK_LINE_FACTOR: f64 = 1.3;
+
 /// A line's (ascent, descent) from hhea values, both positive: the line gap goes above the ascent.
 fn hhea_line(ascender: i16, descender: i16, line_gap: i16) -> (f64, f64) {
     (f64::from(ascender) + f64::from(line_gap.max(0)), f64::from(descender).abs())
@@ -445,6 +448,15 @@ pub fn line_metrics(face: &crate::FontFace) -> (f64, f64) {
             v = m;
         } else if let Some(m) = win.filter(ok) {
             v = m;
+        }
+        // Lily patch 0002: a face that declares a Chinese, Japanese or Korean code page (OS/2
+        // ulCodePageRange1 bits 17-21) gets 1.3 times the single line height, as measured on Word
+        // output (Malgun Gothic 11 pt at 1.15: Word 21.85 pt pitch = 1.3 x hhea).
+        let cjk = f.os2().ok().and_then(|o| o.ul_code_page_range_1()).is_some_and(|r| r & (0x1f << 17) != 0);
+        if cjk {
+            // The extra height is split evenly above the ascent and below the descent.
+            let half = (v.0 + v.1) * (CJK_LINE_FACTOR - 1.0) / 2.0;
+            v = (v.0 + half, v.1 + half);
         }
     }
     cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(face.id(), v);
