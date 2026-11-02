@@ -3785,6 +3785,43 @@ fn bidi_theme_slots_follow_the_theme_font_language() {
     }
 }
 
+/// `w:eastAsiaTheme` (ECMA-376 Part 1 §17.3.2.26) names the theme's East Asian font: the theme's
+/// `a:font` for the script of `w:themeFontLang/@w:eastAsia` (Korean Office: `ko-KR` → `Hang` →
+/// 맑은 고딕), else the theme's `a:ea`; it supersedes `w:eastAsia`. When the theme names neither,
+/// the fixed `w:eastAsia` (else the inherited font) stays. From the specification; not yet
+/// measured against Word (Lily Docs PoC patch, docs/wordcraft-patches.md).
+#[test]
+fn east_asian_theme_slots_follow_the_theme_font_language() {
+    // (themeFontLang, a:ea, fixed w:eastAsia) → (majorEastAsia, minorEastAsia)
+    let cases: &[(Option<&str>, &str, &str, [Option<&str>; 2])] = &[
+        (Some(r#"w:val="en-US" w:eastAsia="ko-KR""#), "", "", [Some("HY Gothic"), Some("Malgun Gothic")]),
+        (Some(r#"w:eastAsia="ja-JP""#), "", "", [Some("Yu Gothic Light"), Some("Yu Mincho")]),
+        (Some(r#"w:eastAsia="zh-CN""#), "EA Font", "", [Some("EA Font"), Some("EA Font")]),
+        (None, "EA Font", "Fixed EA", [Some("EA Font"), Some("EA Font")]),
+        (None, "", "Fixed EA", [Some("Fixed EA"), Some("Fixed EA")]),
+        (None, "", "", [None, None]),
+    ];
+    for (i, (lang, ea, fixed, want)) in cases.iter().enumerate() {
+        let theme = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="T"><a:themeElements><a:fontScheme name="F"><a:majorFont><a:latin typeface="Verdana"/><a:ea typeface="{ea}"/><a:cs typeface=""/><a:font script="Hang" typeface="HY Gothic"/><a:font script="Jpan" typeface="Yu Gothic Light"/></a:majorFont><a:minorFont><a:latin typeface="Impact"/><a:ea typeface="{ea}"/><a:cs typeface=""/><a:font script="Hang" typeface="Malgun Gothic"/><a:font script="Jpan" typeface="Yu Mincho"/></a:minorFont></a:fontScheme></a:themeElements></a:theme>"#
+        );
+        let font_lang = lang.map(|l| format!("<w:themeFontLang {l}/>")).unwrap_or_default();
+        let settings = format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings {W_NS}>{font_lang}</w:settings>"#);
+        let fixed_attr = if fixed.is_empty() { String::new() } else { format!(r#" w:eastAsia="{fixed}""#) };
+        let run = |slot: &str| format!(r#"<w:p><w:r><w:rPr><w:rFonts w:eastAsiaTheme="{slot}"{fixed_attr}/></w:rPr><w:t>가</w:t></w:r></w:p>"#);
+        let body = [run("majorEastAsia"), run("minorEastAsia")].concat();
+        let rels = [
+            ("rId7", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings", "settings.xml"),
+            ("rId9", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme", "theme/theme1.xml"),
+        ];
+        let parts = [("word/theme/theme1.xml", theme.as_str()), ("word/settings.xml", settings.as_str())];
+        let d = wordcraft_docx::read(&docx(&body, &rels, &parts)).unwrap();
+        let fonts: Vec<Option<String>> = paras(&d).iter().map(|p| p.runs[0].props.font_ea.clone()).collect();
+        let want: Vec<Option<String>> = want.iter().map(|w| w.map(str::to_string)).collect();
+        assert_eq!(fonts, want, "case {i}");
+    }
+}
+
 /// The font table's family classes: Word draws a missing roman font in a serif face.
 #[test]
 fn roman_fonts_are_read_from_the_font_table() {

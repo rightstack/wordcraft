@@ -53,6 +53,13 @@ pub struct PropCtx {
     /// The script (ISO 15924) of `w:themeFontLang/@w:bidi`, which picks the font a `…Bidi` theme
     /// slot names. `None` = the settings name no bidi language.
     pub bidi_script: Option<&'static str>,
+    /// The theme's East Asian fonts (`a:ea`), which the `…EastAsia` theme slots fall back on.
+    pub major_ea: String,
+    pub minor_ea: String,
+    /// The script (ISO 15924) of `w:themeFontLang/@w:eastAsia`, which picks the font a
+    /// `…EastAsia` theme slot names (Korean Office: `ko-KR` → the theme's `Hang` font). `None` =
+    /// the settings name no East Asian language.
+    pub ea_script: Option<&'static str>,
     /// The theme's colour scheme (dk1, lt1, dk2, lt2, accent1..6, hlink, folHlink); empty when the
     /// package has none, and then `w:themeColor` falls back to the fixed colour.
     pub theme_colors: Vec<Rgb>,
@@ -155,7 +162,20 @@ impl PropCtx {
         if t.ends_with("Bidi") {
             return Some(self.bidi_theme_font(major));
         }
+        if t.ends_with("EastAsia") {
+            return self.east_asian_theme_font(major);
+        }
         (!latin.is_empty()).then(|| latin.clone())
+    }
+
+    /// The font a `majorEastAsia`/`minorEastAsia` theme slot names: the theme's font for the
+    /// script of `w:themeFontLang/@w:eastAsia` (`a:font script="Hang"` for `ko-KR`), else the
+    /// theme's `a:ea`. `None` when the theme names neither, and the run keeps its inherited East
+    /// Asian font (ECMA-376 Part 1 §17.3.2.26, §20.1.4.1.16).
+    fn east_asian_theme_font(&self, major: bool) -> Option<String> {
+        let (ea, scripts) = if major { (&self.major_ea, &self.major_scripts) } else { (&self.minor_ea, &self.minor_scripts) };
+        let by_script = self.ea_script.and_then(|script| scripts.iter().find(|(s, _)| s == script)).map(|(_, f)| f.clone());
+        by_script.or_else(|| (!ea.is_empty()).then(|| ea.clone()))
     }
 
     /// The font a `majorBidi`/`minorBidi` theme slot names. Measured in Word for Mac: the theme's
@@ -240,8 +260,10 @@ impl PropCtx {
                     // left to inherit: the theme's per-script fonts aren't read.
                     c.font_cs = k.attr("w:cs").filter(|f| !f.is_empty() && f.len() < 256).map(str::to_string);
                     // The East Asian font (Chinese, Japanese, Korean text). A `w:eastAsiaTheme` font
-                    // is left to inherit, like `w:cstheme`.
-                    c.font_ea = k.attr("w:eastAsia").filter(|f| !f.is_empty() && f.len() < 256).map(str::to_string);
+                    // supersedes `w:eastAsia` (§17.3.2.26); one the theme doesn't name is left to
+                    // the fixed font, then to inherit.
+                    c.font_ea =
+                        themed("w:eastAsiaTheme").or_else(|| k.attr("w:eastAsia").filter(|f| !f.is_empty() && f.len() < 256).map(str::to_string));
                 }
                 "w:b" => c.bold = Some(on_off(k)),
                 "w:bCs" => c.bold_cs = Some(on_off(k)),
