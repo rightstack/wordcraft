@@ -95,9 +95,12 @@ pub enum AsianSide {
 /// is neither Asian nor Latin here, and Latin punctuation such as `%` or `(` is not Latin.
 pub fn auto_space(a: char, b: char, de: bool, dn: bool) -> Option<AsianSide> {
     let spaced = |other: char| (de && is_latin_letter(other)) || (dn && other.is_ascii_digit());
-    if is_asian_text(a) && spaced(b) {
+    // Lily patch 0004: Hangul syllables count as Asian text here (measured on Word output: a
+    // quarter-em gap between "WordCraft" and "의", "2026" and "년").
+    let asian = |c: char| is_asian_text(c) || is_hangul(c);
+    if asian(a) && spaced(b) {
         Some(AsianSide::Left)
-    } else if is_asian_text(b) && spaced(a) {
+    } else if asian(b) && spaced(a) {
         Some(AsianSide::Right)
     } else {
         None
@@ -127,7 +130,8 @@ mod tests {
         assert_eq!(auto_space('A', 'カ', true, true), Some(AsianSide::Right));
         assert_eq!(auto_space('院', '9', true, false), None);
         assert_eq!(auto_space('A', '字', false, true), None);
-        for (a, b) in [('5', '、'), ('、', '8'), ('漢', '%'), ('漢', '한'), ('한', 'A'), ('a', 'b'), ('漢', '字'), ('漢', '１')] {
+        assert_eq!(auto_space('A', '한', true, true), Some(AsianSide::Right));
+        for (a, b) in [('5', '、'), ('、', '8'), ('漢', '%'), ('漢', '한'), ('a', 'b'), ('漢', '字'), ('漢', '１')] {
             assert_eq!(auto_space(a, b, true, true), None, "{a}{b}");
         }
     }

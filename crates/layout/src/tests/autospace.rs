@@ -76,9 +76,20 @@ fn the_space_crosses_runs_and_takes_the_asian_size() {
 
 #[test]
 fn spaces_punctuation_hangul_and_latin_alone_get_nothing() {
-    for text in ["例 a", "5 例", "5、", "、8", "abc 123", "漢한", "한A", "漢%", "（A）"] {
+    // Lily patch 0004: "한A" now gets a gap (Hangul is Asian text for automatic spacing).
+    for text in ["例 a", "5 例", "5、", "、8", "abc 123", "漢한", "漢%", "（A）"] {
         let d = Document::from_text(text);
         assert!(gaps(&d).iter().all(|g| *g == 0.0), "{text}: {:?}", gaps(&d));
+    }
+}
+
+/// Lily patch 0004: measured on Word output, Latin text or digits next to Hangul get a quarter em.
+#[test]
+fn hangul_next_to_latin_or_digits_gets_a_quarter_em() {
+    for text in ["한A", "A한", "2026년"] {
+        let d = Document::from_text(text);
+        let q = quarter(&d);
+        assert!(gaps(&d).contains(&q), "{text}: {:?}", gaps(&d));
     }
 }
 
