@@ -55,6 +55,16 @@ pub fn apply(text: &str, opps: &mut Vec<usize>, kinsoku: bool, word_wrap: bool) 
             }
         }
     }
+    if word_wrap {
+        // Lily patch 0003: with word wrap on (the default), Korean wraps at word (eojeol)
+        // boundaries like Latin text — UAX #14 allows a break between any two Hangul syllables,
+        // Word does not (measured: every Hangul line break in Word's output is at a space).
+        // Anything but a space next to Hangul stays on the line: "디센트(descent)," is one word.
+        opps.retain(|&i| match (prev_char(i), next_char(i)) {
+            (Some(a), Some(b)) => !(!a.is_whitespace() && !b.is_whitespace() && (is_hangul(a) || is_hangul(b))),
+            _ => true,
+        });
+    }
     if !word_wrap {
         // Between any two letters or digits that are not East Asian (whole graphemes, so accents
         // stay with their letters).
