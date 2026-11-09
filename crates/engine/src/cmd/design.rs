@@ -64,7 +64,7 @@ pub fn specs() -> Vec<CommandSpec> {
             sel_result(s)
         }),
         CommandSpec::new("design.styleSet", "Style Set", "Design › Document Formatting", style_set)
-            .params(r#"{"name": "default|basic|lines|shaded|casual|centered|minimalist|title"}"#),
+            .params(r#"{"name": "default|basic|lines|shaded|casual|centered|minimalist|title|blackWhite|modern|banded"}"#),
         CommandSpec::new("design.paragraphSpacing", "Paragraph Spacing", "Design › Document Formatting", para_spacing)
             .params(r#"{"value": "default|none|compact|tight|open|relaxed|double"}"#),
         CommandSpec::new("design.scaleFontSizes", "Scale Font Sizes", "Design › Document Formatting", scale_font_sizes)
@@ -168,6 +168,14 @@ fn style_set(s: &mut Session, v: &Value) -> CmdResult {
                 st.chr.color = Some(TextColor::Rgb(Rgb(0x40, 0x40, 0x40)));
             }
             "title" if st.id == "Title" => st.chr.size = Some(36.0),
+            "banded" if st.id == "Title" => {
+                st.para.shading = Some(accent);
+                st.chr.color = Some(TextColor::Rgb(Rgb::WHITE));
+            }
+            "modern" if st.id == "Title" => {
+                let dark = Border { color: Some(Rgb(0x1D, 0x1D, 0x22)), ..line };
+                st.para.borders = Some(Borders { bottom: Some(dark), ..Default::default() });
+            }
             _ => {}
         }
     }
@@ -187,6 +195,29 @@ fn style_set(s: &mut Session, v: &Value) -> CmdResult {
     let (h, b) = (s.doc.settings.major_font.clone(), s.doc.settings.minor_font.clone());
     set_fonts(s, &h, &b);
     set_accent(s, accent);
+    // [lily] Sets whose headings keep their own colour (applied after the accent above).
+    let own = match name {
+        "blackWhite" => Some(Rgb(0, 0, 0)),
+        "modern" => Some(s.doc.settings.theme_colors.get(9).copied().unwrap_or(Rgb(0x70, 0xAD, 0x47))),
+        _ => None,
+    };
+    if let Some(c) = own {
+        for st in &mut s.doc.styles.styles {
+            let heading = st.id.starts_with("Heading") || st.id == "Title";
+            if !heading {
+                continue;
+            }
+            if name == "blackWhite" || st.id != "Title" {
+                st.chr.color = Some(TextColor::Rgb(c));
+            }
+            if name == "blackWhite" {
+                st.chr.bold = Some(true);
+                if st.id == "Title" || st.id == "Heading1" {
+                    st.para.align = Some(wordcraft_doc::Align::Center);
+                }
+            }
+        }
+    }
     sel_result(s)
 }
 

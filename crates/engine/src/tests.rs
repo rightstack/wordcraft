@@ -11434,7 +11434,7 @@ fn text_insert_marks_automatic_rewrites_as_transformed() {
 fn style_set_keeps_imported_styles_latent_styles_and_defaults() {
     use wordcraft_doc::props::{Rgb, TextColor};
     use wordcraft_doc::styles::{Style, StyleKind};
-    for name in ["basic", "lines", "shaded", "casual", "centered", "minimalist", "title"] {
+    for name in ["basic", "lines", "shaded", "casual", "centered", "minimalist", "title", "blackWhite", "modern", "banded"] {
         let mut s = s();
         let mut body = s.doc.styles.get("Normal").unwrap().clone();
         body.id = "BodyText".into();
@@ -11463,6 +11463,28 @@ fn style_set_keeps_imported_styles_latent_styles_and_defaults() {
     let mut s = s();
     run(&mut s, "design.styleSet", json!({ "name": "title" }));
     assert_eq!(s.doc.styles.get("Title").unwrap().chr.size, Some(36.0));
+}
+
+/// [lily] Black & White, Modern and Banded style sets keep their own heading look after the
+/// accent colour is applied.
+#[test]
+fn black_white_modern_and_banded_style_sets() {
+    use wordcraft_doc::props::{Rgb, TextColor};
+    let color = |s: &Session, id: &str| s.doc.styles.get(id).unwrap().chr.color;
+    let mut d = s();
+    run(&mut d, "design.styleSet", json!({ "name": "blackWhite" }));
+    assert_eq!(color(&d, "Heading1"), Some(TextColor::Rgb(Rgb(0, 0, 0))));
+    assert_eq!(color(&d, "Title"), Some(TextColor::Rgb(Rgb(0, 0, 0))));
+    assert_eq!(d.doc.styles.get("Heading1").unwrap().para.align, Some(wordcraft_doc::Align::Center));
+    let mut d = s();
+    run(&mut d, "design.styleSet", json!({ "name": "modern" }));
+    assert!(d.doc.styles.get("Title").unwrap().para.borders.as_ref().is_some_and(|b| b.bottom.is_some()));
+    assert_ne!(color(&d, "Heading1"), color(&d, "Title"));
+    let mut d = s();
+    run(&mut d, "design.styleSet", json!({ "name": "banded" }));
+    let title = d.doc.styles.get("Title").unwrap();
+    assert!(title.para.shading.is_some());
+    assert_eq!(title.chr.color, Some(TextColor::Rgb(Rgb::WHITE)));
 }
 
 fn style_size(s: &Session, id: &str) -> f32 {
