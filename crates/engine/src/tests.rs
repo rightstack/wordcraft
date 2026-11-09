@@ -10766,6 +10766,36 @@ fn exported_page_images_draw_headers_at_full_strength() {
 /// Shape Format › Shape Fill with transparency and gradients (#1500): each form sets the fill of
 /// every selected shape in one undo step; a colour alone keeps the transparency; hostile values
 /// are clamped; the old `{"color"}` form still works.
+/// [lily] Bring to Front / Send to Back change the stacking order (`relativeHeight`), not the
+/// wrapping; one undo step each.
+#[test]
+fn bring_to_front_and_send_to_back_restack_floating_objects() {
+    let mut s = s();
+    run(&mut s, "insert.shape", json!({"kind": "rectangle"}));
+    run(&mut s, "select.collapse", json!({"end": true}));
+    run(&mut s, "insert.shape", json!({"kind": "ellipse"}));
+    for i in [0, 1] {
+        run(&mut s, "select.objects", json!({"index": i}));
+        run(&mut s, "arrange.wrap", json!({"wrap": "square"}));
+    }
+    let zs = |s: &Session| -> Vec<u32> { cmd::objects::all_objects(s).into_iter().filter_map(|(_, o)| o.frame().map(|(_, _, f)| f.z)).collect() };
+    let wraps = |s: &Session| -> Vec<wordcraft_doc::para::Wrap> {
+        cmd::objects::all_objects(s).into_iter().filter_map(|(_, o)| o.frame().map(|(_, _, f)| f.wrap)).collect()
+    };
+    let before = wraps(&s);
+    run(&mut s, "select.objects", json!({"index": 0}));
+    run(&mut s, "arrange.bringToFront", json!({}));
+    let z = zs(&s);
+    assert!(z[0] > z[1] && z[1] > 0, "{z:?}");
+    assert_eq!(wraps(&s), before, "the wrapping stays");
+    run(&mut s, "arrange.sendToBack", json!({}));
+    let z = zs(&s);
+    assert!(z[0] < z[1] && z[0] > 0, "{z:?}");
+    run(&mut s, "edit.undo", json!({}));
+    let z = zs(&s);
+    assert!(z[0] > z[1], "undo: {z:?}");
+}
+
 #[test]
 fn shape_fill_transparency_and_gradients() {
     use wordcraft_doc::fill::{Fill, GradientKind, PathShape};

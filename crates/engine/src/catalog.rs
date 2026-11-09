@@ -234,6 +234,8 @@ Layout|Arrange|Position|arrange.position
 Layout|Arrange|Wrap Text|arrange.wrap
 Layout|Arrange|Bring Forward|arrange.bringForward
 Layout|Arrange|Send Backward|arrange.sendBackward
+Layout|Arrange|Bring to Front|arrange.bringToFront
+Layout|Arrange|Send to Back|arrange.sendToBack
 Layout|Arrange|Selection Pane|arrange.selectionPane
 Layout|Arrange|Align|arrange.align
 Layout|Arrange|Group|arrange.group

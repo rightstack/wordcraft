@@ -226,6 +226,9 @@ pub fn specs() -> Vec<CommandSpec> {
         .when(has_movable),
         CommandSpec::new("arrange.bringForward", "Bring Forward", "Layout › Arrange", |s, _| with_float(s, |f| f.wrap = Wrap::InFrontOfText)).when(has_movable),
         CommandSpec::new("arrange.sendBackward", "Send Backward", "Layout › Arrange", |s, _| with_float(s, |f| f.wrap = Wrap::BehindText)).when(has_movable),
+        // [lily] Bring to Front / Send to Back: the stacking order (`relativeHeight`) among floating objects.
+        CommandSpec::new("arrange.bringToFront", "Bring to Front", "Layout › Arrange", |s, _| restack(s, true)).when(has_movable),
+        CommandSpec::new("arrange.sendToBack", "Send to Back", "Layout › Arrange", |s, _| restack(s, false)).when(has_movable),
         CommandSpec::new("arrange.align", "Align", "Layout › Arrange", |s, v| {
             let h = p::str(v, "value").unwrap_or("center").to_string();
             let tw = crate::cmd::page::sect(s).text_width();
@@ -358,4 +361,31 @@ pub fn specs() -> Vec<CommandSpec> {
             _ => Some("select a text box linked to another first"),
         }),
     ]
+}
+
+/// [lily] Put the selected object on top of (or under) every other floating object. Objects
+/// without a stacking order (`z` 0: drawn in paragraph order) first get one in document order,
+/// above those that have one, so the new order is explicit and survives a save (`relativeHeight`).
+/// An inline object is taken out of the text first, as Bring Forward / Send Backward do.
+fn restack(s: &mut super::Session, front: bool) -> super::CmdResult {
+    let is_float = |o: &InlineObject| o.frame().is_some_and(|(_, _, f)| f.wrap != Wrap::Inline);
+    let mut top = all_objects(s).iter().filter_map(|(_, o)| o.frame().map(|(_, _, f)| f.z)).max().unwrap_or(0) + u32::from(!front);
+    s.doc.objects_mut(&|o| is_float(o), &mut |o| {
+        if let Some(f) = o.float_mut() {
+            if f.z == 0 {
+                top = top.saturating_add(1);
+                f.z = top;
+            } else if !front {
+                f.z = f.z.saturating_add(1);
+            }
+        }
+    });
+    let z = if front { top.saturating_add(1) } else { 1 };
+    with_float(s, |f| {
+        // An object in line with text has no stacking order: it comes out in front of (behind) the text.
+        if f.wrap == Wrap::Inline {
+            f.wrap = if front { Wrap::InFrontOfText } else { Wrap::BehindText };
+        }
+        f.z = z;
+    })
 }
