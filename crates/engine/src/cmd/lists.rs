@@ -24,7 +24,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(r#"{"num"?: list id (default: the caret's list)} → {"num", "levels": [as list.define]}"#)
             .pure(),
         CommandSpec::new("list.multilevelPreset", "Multilevel List Library", "Home › Paragraph › Multilevel List", preset).params(
-            r#"{"preset": "headings" (1 / 1.1 / 1.1.1) | "article" (Article I. / Section 1.01 / (a)) | "outlineHeadings" (I. / A. / 1.) | "chapter" (Chapter 1, lower levels unnumbered)} — a new list whose nine levels are linked to Heading 1–9: every paragraph in those styles is numbered, selected paragraphs already in a Heading style keep it, and any other selected paragraph becomes Heading 1 (the first level)"#,
+            r#"{"preset": "headings" (1 / 1.1 / 1.1.1) | "article" (Article I. / Section 1.01 / (a)) | "outlineHeadings" (I. / A. / 1.) | "chapter" (Chapter 1, lower levels unnumbered) | "koOutlineHeadings" (I. / 가. / 1.) | "koArticle" (제1조 / 제1절 / (가)) | "koChapter" (제1장)} — a new list whose nine levels are linked to Heading 1–9: every paragraph in those styles is numbered, selected paragraphs already in a Heading style keep it, and any other selected paragraph becomes Heading 1 (the first level)"#,
         ),
     ]
 }
@@ -276,6 +276,35 @@ fn preset_levels(preset: &str) -> Option<Vec<Level>> {
                 }
                 "chapter" if i == 0 => (F::Decimal, "Chapter %1".to_string(), 0.0),
                 "chapter" => (F::None, String::new(), 0.0),
+                // Korean conventions: I. / 가. / 1. / 가) / (1) / (가) …, 제1조 / 제1절 / (가), 제1장.
+                "koOutlineHeadings" => {
+                    let f =
+                        [F::UpperRoman, F::Ganada, F::Decimal, F::Ganada, F::Decimal, F::Ganada, F::DecimalEnclosedCircle, F::Ganada, F::LowerRoman];
+                    let t = match i {
+                        0..=2 => format!("%{n}."),
+                        3 => format!("%{n})"),
+                        6 => format!("%{n}"),
+                        _ => format!("(%{n})"),
+                    };
+                    (f.get(i).copied().unwrap_or(F::Decimal), t, 36.0 * n as f32)
+                }
+                "koArticle" => match i {
+                    0 => (F::Decimal, "제%1조".to_string(), 0.0),
+                    1 => (F::Decimal, "제%2절".to_string(), 0.0),
+                    _ => {
+                        let f = [F::Ganada, F::Decimal, F::Ganada, F::DecimalEnclosedCircle, F::Ganada, F::LowerRoman, F::LowerLetter];
+                        let t = if i == 5 {
+                            format!("%{n}")
+                        } else if i % 2 == 0 {
+                            format!("(%{n})")
+                        } else {
+                            format!("%{n})")
+                        };
+                        (f.get(i - 2).copied().unwrap_or(F::Decimal), t, 36.0 + 7.2 * (i - 2) as f32)
+                    }
+                },
+                "koChapter" if i == 0 => (F::Decimal, "제%1장".to_string(), 0.0),
+                "koChapter" => (F::None, String::new(), 0.0),
                 _ => return None,
             };
             // "Section 1.01" shows the article number in digits (legal numbering).
@@ -291,7 +320,9 @@ fn preset_levels(preset: &str) -> Option<Vec<Level>> {
 /// Quote, Title…) becomes Heading 1, as in Word.
 fn preset(s: &mut Session, v: &Value) -> CmdResult {
     let id = p::req_str(v, "preset")?;
-    let levels = preset_levels(id).ok_or_else(|| CmdError::Params("`preset` must be headings, article, outlineHeadings or chapter".into()))?;
+    let levels = preset_levels(id).ok_or_else(|| {
+        CmdError::Params("`preset` must be headings, article, outlineHeadings, chapter, koOutlineHeadings, koArticle or koChapter".into())
+    })?;
     let num = s.doc.numbering.try_add_levels(None, levels)?;
     let mut linked = Vec::new();
     for n in 1..=LEVELS as u8 {

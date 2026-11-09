@@ -3631,3 +3631,22 @@ fn backspace_cannot_join_into_locked_content_control() {
     assert!(s.run("text.backspace", &json!({})).is_err());
     assert_eq!(s.doc, before);
 }
+
+/// [lily] Korean Multilevel List presets: 제1조 / 제1절 / (가), I. / 가. / 1. and 제1장, linked
+/// to the heading styles like the other presets (a Normal paragraph becomes Heading 1).
+#[test]
+fn korean_multilevel_presets_number_the_headings() {
+    for (preset, want) in [("koArticle", ["제1조", "제1절", "(가)"]), ("koOutlineHeadings", ["I.", "가.", "1."]), ("koChapter", ["제1장", "", ""])]
+    {
+        let mut s = s();
+        typ(&mut s, "One\nTwo\nThree");
+        run(&mut s, "caret.docStart", json!({}));
+        run(&mut s, "list.multilevelPreset", json!({"preset": preset}));
+        run(&mut s, "caret.docEnd", json!({}));
+        run(&mut s, "para.heading3", json!({}));
+        run(&mut s, "caret.up", json!({}));
+        run(&mut s, "para.heading2", json!({}));
+        let got: Vec<String> = numbers(&mut s).into_iter().map(|(l, _)| l.unwrap_or_default()).collect();
+        assert_eq!(got, want, "{preset}");
+    }
+}
