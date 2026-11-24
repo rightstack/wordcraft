@@ -96,13 +96,16 @@ pub enum GraphicItem {
         #[serde(default)]
         stroke_width: f32,
     },
-    /// A path: polygons, pie slices, line series.
+    /// A path: polygons, pie slices, line series. A `gradient` paints the inside in place of
+    /// `fill` where it can be drawn; `fill` is then the plain colour to use where it can't.
     Path {
         segs: Vec<PathSeg>,
         fill: Option<Rgb>,
         stroke: Option<Rgb>,
         #[serde(default)]
         stroke_width: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gradient: Option<LinearGradient>,
     },
     /// One line of text in `rect`, aligned horizontally by `align`, centred vertically.
     Text {
@@ -116,9 +119,44 @@ pub enum GraphicItem {
         align: TextAlign,
         #[serde(default)]
         font: Option<String>,
+        /// Turned about the rectangle's centre, degrees clockwise (chart labels slanted up: -45).
+        #[serde(default, skip_serializing_if = "is_unturned")]
+        rotation: f32,
     },
     /// A picture (`Document::media` key) stretched into `rect`.
     Image { rect: [f32; 4], media: String },
+}
+
+/// Whether a text item's turn is none (left out when saving the items as JSON).
+fn is_unturned(deg: &f32) -> bool {
+    *deg == 0.0
+}
+
+/// A linear gradient in a graphic's own coordinates (points): colour stops along the line from
+/// `from` to `to`, padded with the end colours beyond it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearGradient {
+    pub from: [f32; 2],
+    pub to: [f32; 2],
+    pub stops: Vec<GradientStop>,
+    /// Circular instead: out from `from` (offset 0) to the distance of `to` (offset 1).
+    #[serde(default, skip_serializing_if = "is_unradial")]
+    pub radial: bool,
+}
+
+fn is_unradial(b: &bool) -> bool {
+    !*b
+}
+
+/// One stop of a [`LinearGradient`]: where it sits (0..1 from `from` to `to`), its colour and its
+/// opacity (0..1).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradientStop {
+    pub offset: f32,
+    pub color: Rgb,
+    pub alpha: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

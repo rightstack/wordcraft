@@ -6327,6 +6327,7 @@ fn graphic_items_draw_inside_the_object() {
             fill: None,
             stroke: Some(Rgb::BLACK),
             stroke_width: 0.0,
+            gradient: None,
         },
         GraphicItem::Text {
             rect: [0.0, 100.0, 216.0, 20.0],
@@ -6336,6 +6337,7 @@ fn graphic_items_draw_inside_the_object() {
             bold: false,
             align: TextAlign::Center,
             font: None,
+            rotation: 0.0,
         },
     ];
     let mut d = Document::from_text("Chart");
@@ -6354,6 +6356,42 @@ fn graphic_items_draw_inside_the_object() {
 }
 
 #[test]
+fn graphic_gradient_paths_are_drawn_with_a_linear_paint() {
+    use wordcraft_doc::graphic::{GradientStop, Graphic, GraphicItem, GraphicKind, LinearGradient, PathSeg};
+    use wordcraft_doc::props::Rgb;
+    let red = Rgb(0xFF, 0, 0);
+    let path = |gradient: Option<LinearGradient>| GraphicItem::Path {
+        segs: vec![PathSeg::Move(0.0, 0.0), PathSeg::Line(100.0, 0.0), PathSeg::Line(100.0, 100.0), PathSeg::Close],
+        fill: Some(Rgb(0x80, 0x80, 0x80)),
+        stroke: None,
+        stroke_width: 0.0,
+        gradient,
+    };
+    let stops = vec![
+        GradientStop { offset: 1.0, color: red, alpha: 0.15 },
+        GradientStop { offset: 0.0, color: red, alpha: 0.8 },
+        GradientStop { offset: f32::NAN, color: red, alpha: 9.0 },
+    ];
+    let good = LinearGradient { from: [0.0, 0.0], to: [0.0, 100.0], stops, radial: false };
+    let zero = LinearGradient { from: [5.0, 5.0], to: [5.0, 5.0], ..good.clone() };
+    let mut d = Document::from_text("Chart");
+    let graphic = Graphic { kind: GraphicKind::Chart, w: 200.0, h: 200.0, items: vec![path(Some(good)), path(Some(zero))], ..Default::default() };
+    let obj = InlineObject::Graphic { w: 200.0, h: 200.0, alt: String::new(), float: Default::default(), graphic: Arc::new(graphic) };
+    d.insert_object(&Pos::body(0, 0), obj, &Default::default()).unwrap();
+    let l = lay(&d);
+    let draws = flat(display::page_display(&d, &l.pages[0], &Default::default()));
+    let fills: Vec<(&display::Paint, PathSeg)> =
+        draws.iter().filter_map(|x| if let display::Draw::Path { fill: Some(p), segs, .. } = x { Some((p, *segs.first()?)) } else { None }).collect();
+    assert_eq!(fills.len(), 2);
+    let (display::Paint::Linear { p0, p1, stops }, PathSeg::Move(mx, my)) = (fills[0].0, fills[0].1) else { panic!("{:?}", fills[0]) };
+    // In page coordinates, top to bottom of the path; stops in order, held to 0..1.
+    assert_eq!((p0.0, p0.1, p1.0, p1.1 - p0.1), (mx, my, mx, 100.0));
+    assert_eq!(stops.iter().map(|s| (s.0, s.2)).collect::<Vec<_>>(), [(0.0, 0.8), (0.0, 1.0), (1.0, 0.15)]);
+    // A gradient with no length falls back to the plain fill.
+    assert_eq!(fills[1].0, &display::Paint::Solid(Rgb(0x80, 0x80, 0x80), 1.0));
+}
+
+#[test]
 fn graphic_text_in_a_degenerate_rectangle_is_not_drawn() {
     use wordcraft_doc::graphic::{Graphic, GraphicItem, GraphicKind, TextAlign};
     use wordcraft_doc::props::Rgb;
@@ -6365,6 +6403,7 @@ fn graphic_text_in_a_degenerate_rectangle_is_not_drawn() {
         bold: false,
         align: TextAlign::Center,
         font: None,
+        rotation: 0.0,
     };
     let items = vec![text([f32::NAN, 0.0, 10.0, 10.0], 10.0), text([0.0, 0.0, f32::INFINITY, 10.0], 10.0), text([0.0, 0.0, 10.0, 10.0], f32::NAN)];
     let graphic = Graphic { kind: GraphicKind::Diagram, items, ..Default::default() };
@@ -6393,6 +6432,7 @@ fn chart_text_the_font_lacks_is_drawn_in_a_fallback_face() {
         bold: false,
         align: TextAlign::Center,
         font: None,
+        rotation: 0.0,
     }];
     let graphic = Graphic { kind: GraphicKind::Chart, items, ..Default::default() };
     let obj = InlineObject::Graphic { w: 216.0, h: 144.0, alt: String::new(), float: Default::default(), graphic: Arc::new(graphic) };
@@ -6433,6 +6473,7 @@ fn inline_chart_is_a_figure_with_its_alt_text() {
         fill: None,
         stroke: Some(Rgb::BLACK),
         stroke_width: 1.0,
+        gradient: None,
     }];
     let graphic = Graphic { kind: GraphicKind::Chart, items, ..Default::default() };
     let obj = InlineObject::Graphic { w: 216.0, h: 144.0, alt: "Sales by quarter".into(), float: Default::default(), graphic: Arc::new(graphic) };
@@ -6458,7 +6499,7 @@ fn graphic_paths_drop_segments_that_cannot_be_drawn() {
         PathSeg::Close,
         PathSeg::Line(9.0, 9.0),
     ];
-    let items = vec![GraphicItem::Path { segs, fill: None, stroke: Some(Rgb::BLACK), stroke_width: 1.0 }];
+    let items = vec![GraphicItem::Path { segs, fill: None, stroke: Some(Rgb::BLACK), stroke_width: 1.0, gradient: None }];
     let graphic = Graphic { kind: GraphicKind::Chart, items, ..Default::default() };
     let obj = InlineObject::Graphic { w: 216.0, h: 144.0, alt: String::new(), float: Default::default(), graphic: Arc::new(graphic) };
     let mut d = Document::from_text("Chart");

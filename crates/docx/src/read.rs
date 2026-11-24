@@ -110,6 +110,9 @@ pub(crate) struct Reader<'p> {
     pub theme_fills: shape_style::ThemeFills,
     /// The fill of the group being read (what its members' `a:grpFill` stands for).
     pub group_fill: Option<wordcraft_doc::fill::Fill>,
+    /// The charts read so far with a model: drawing name, graphic, whether the part had our
+    /// extension (for the document-level chart records).
+    pub chart_seen: Vec<crate::chart_meta::Seen>,
 }
 
 /// The package path that internal relationship `id` points at, if it has type `kind` (an `rt`
@@ -175,6 +178,7 @@ pub(crate) fn read_opened(pkg: &Package) -> Result<Document, DocxError> {
         txbx_links: Vec::new(),
         theme_fills: Default::default(),
         group_fill: None,
+        chart_seen: Vec::new(),
     };
     r.pc.major_font = r.doc.settings.major_font.clone();
     r.pc.minor_font = r.doc.settings.minor_font.clone();
@@ -320,6 +324,19 @@ pub(crate) fn read_opened(pkg: &Package) -> Result<Document, DocxError> {
     link_text_boxes(&mut r.doc, links);
     if r.shape_ids {
         keep_glued_ids(&mut r.doc, &r.glued);
+    }
+    // WordCraft's chart records (a custom XML data part): the settings only WordCraft keeps, for
+    // charts whose part lost its extension in another program's hands.
+    let records: Vec<crate::chart_meta::Record> = bib_parts
+        .iter()
+        .filter_map(|p| r.xml(p).ok().flatten())
+        .find(crate::chart_meta::is_records)
+        .map(|root| crate::chart_meta::read_part(&root))
+        .unwrap_or_default();
+    if !records.is_empty() && !r.chart_seen.is_empty() {
+        let seen = std::mem::take(&mut r.chart_seen);
+        let theme = r.doc.settings.theme_colors.clone();
+        crate::chart_meta::apply(&mut r.doc, &seen, &records, &theme);
     }
     let mut doc = r.doc;
     doc.ensure_nonempty();

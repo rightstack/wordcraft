@@ -184,7 +184,7 @@ fn shape(sp: &El, xf: Xf, b: [f64; 4], theme: &[Rgb], fit: f32, image: &mut dyn 
                     segs.push(PathSeg::Close);
                 }
                 let fill = if closed { fill } else { None };
-                out.push(GraphicItem::Path { segs, fill, stroke, stroke_width });
+                out.push(GraphicItem::Path { segs, fill, stroke, stroke_width, gradient: None });
             }
             Geo::Poly(..) => {}
         }
@@ -463,7 +463,16 @@ fn text(sp: &El, xf: Xf, b: [f64; 4], theme: &[Rgb], filled: bool, fit: f32, out
     let mut y = y0 + (th - total) / 2.0;
     for l in lines {
         let lh = l.size * LINE;
-        out.push(GraphicItem::Text { rect: [x0, y, tw, lh], text: l.text, size: l.size, color: l.color, bold: l.bold, align: l.align, font: l.font });
+        out.push(GraphicItem::Text {
+            rect: [x0, y, tw, lh],
+            text: l.text,
+            size: l.size,
+            color: l.color,
+            bold: l.bold,
+            align: l.align,
+            font: l.font,
+            rotation: 0.0,
+        });
         y += lh;
     }
 }

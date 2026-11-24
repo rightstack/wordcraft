@@ -4,6 +4,24 @@ use super::{
     TextWarp, Wrap, WrapText, cap_alt, children_of_choice, int, measure, on_off_attr, own_fill, preset_kind, rt, shape_paint, u32_of,
 };
 
+/// Most charts kept for the document-level chart records.
+const MAX_CHARTS_SEEN: usize = 4096;
+
+/// Whether a drawing (`wp:inline`/`wp:anchor`) is locked in place: a `noMove` or `noResize` lock
+/// on its frame (`wp:cNvGraphicFramePr/a:graphicFrameLocks`), its picture (`a:picLocks`) or its
+/// shape (`a:spLocks`), ECMA-376 §20.1.2.2.
+fn drawing_locked(c: &El) -> bool {
+    let on = |l: Option<&El>| l.is_some_and(|l| on_off_attr(l, "noMove") || on_off_attr(l, "noResize"));
+    let gd = c.child("a:graphic").and_then(|g| g.child("a:graphicData"));
+    on(c.child("wp:cNvGraphicFramePr").and_then(|p| p.child("a:graphicFrameLocks")))
+        || on(gd
+            .and_then(|g| g.child("pic:pic"))
+            .and_then(|p| p.child("pic:nvPicPr"))
+            .and_then(|n| n.child("pic:cNvPicPr"))
+            .and_then(|n| n.child("a:picLocks")))
+        || on(gd.and_then(|g| g.child("wps:wsp")).and_then(|p| p.child("wps:cNvSpPr")).and_then(|n| n.child("a:spLocks")))
+}
+
 impl Reader<'_> {
     // ---- drawings ----
 
@@ -23,6 +41,7 @@ impl Reader<'_> {
         let mut float = if anchored { anchor_float(c) } else { Float::default() };
         float.alt = meta;
         float.hidden = c.child("wp:docPr").is_some_and(|p| on_off_attr(p, "hidden"));
+        float.locked = drawing_locked(c);
         if let Some(e) = c.child("wp:effectExtent") {
             for (slot, n) in float.effect.iter_mut().zip(["l", "t", "r", "b"]) {
                 // Negative for a rotated object narrower than its frame; settled below.
@@ -69,6 +88,17 @@ impl Reader<'_> {
             };
             let source = c.child("a:graphic").and_then(|g| self.keep_embedded(g, rels, &extra));
             let graphic = self.graphic(kind, gd, rels, w, h, source);
+            // A chart with a model, for the document-level records: by its drawing's name.
+            if graphic.chart.is_some() && self.chart_seen.len() < MAX_CHARTS_SEEN {
+                let name = c.child("wp:docPr").and_then(|p| p.attr("name")).unwrap_or_default().to_string();
+                let had_ext = gd
+                    .child("c:chart")
+                    .and_then(|ch| ch.attr("r:id"))
+                    .and_then(|id| crate::read::part_of(rels, id, rt::CHART))
+                    .and_then(|path| self.graphic_part(&path))
+                    .is_some_and(|space| crate::chart_spec::has_extension(&space));
+                self.chart_seen.push((name, graphic.clone(), had_ext));
+            }
             float.effect = float.effect.map(|e| e.max(0.0));
             return Some(InlineObject::Graphic { w, h, alt, float, graphic });
         }
@@ -220,8 +250,9 @@ impl Reader<'_> {
         }
         let items = if self.graphic_budget == 0 { Vec::new() } else { self.graphic_items(kind, &key.1, w, h) };
         self.graphic_budget = self.graphic_budget.saturating_sub(graphic_work(&items));
-        // A chart or SmartArt that is exactly what WordCraft writes for its model can be edited
-        // (and is written from the model); any other stays as it was read.
+        // A chart the model can hold can be edited; it keeps its source, so until it is edited it
+        // is written back as it was read. A SmartArt graphic that is exactly what WordCraft writes
+        // for its model is written from the model; any other stays as it was read.
         let chart = match kind {
             GraphicKind::Chart if !items.is_empty() => self.graphic_part(&key.1).and_then(|space| crate::chart_spec::spec_of(&space)).map(Arc::new),
             _ => None,
@@ -230,7 +261,7 @@ impl Reader<'_> {
             GraphicKind::Diagram if !items.is_empty() => self.smart_art_spec(gd, rels).map(Arc::new),
             _ => None,
         };
-        let source = if chart.is_some() || smart_art.is_some() { None } else { source };
+        let source = if smart_art.is_some() { None } else { source };
         let g = Arc::new(Graphic { kind, items, w, h, source, chart, smart_art });
         self.graphics.insert(key, g.clone());
         g

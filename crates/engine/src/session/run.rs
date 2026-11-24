@@ -53,6 +53,9 @@ impl Session {
     /// control channel). Mutating commands are undoable; a failed command leaves the document as
     /// it was; a panic inside a command becomes an error.
     pub fn run(&mut self, id: &str, params: &Value) -> Result<Value, CmdError> {
+        // A chart preview ends before an edit or a file command (Save, Undo, a real colour change
+        // among them), so nothing ever saves or records it; read-only queries leave it.
+        self.end_chart_preview_before(id);
         // The document the command starts in, and the first id a document it opens can have.
         let home = self.document_id;
         let mark = document_id_mark();

@@ -123,6 +123,10 @@ impl Reader<'_> {
                 if !self.doc.sources.is_empty() && self.xml(&rel.target).ok().flatten().is_some_and(|r| r.local() == "Sources") {
                     continue;
                 }
+                // WordCraft's chart records are written again from the charts on every save.
+                if self.xml(&rel.target).ok().flatten().is_some_and(|r| crate::chart_meta::is_records(&r)) {
+                    continue;
+                }
                 // Native ink shares the custom XML relationship type, but its part belongs to the
                 // drawing that refers to it: kept with it, or dropped with it (no orphan part).
                 let pkg = self.pkg;

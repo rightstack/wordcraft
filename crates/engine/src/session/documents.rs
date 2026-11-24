@@ -278,6 +278,8 @@ impl Session {
             others: _,
             order: _,
             untitled_count: _,
+            // A preview ends with any command, a document switch among them.
+            chart_preview: _,
             #[cfg(not(target_arch = "wasm32"))]
                 recovery: _,
         } = self;

@@ -33,6 +33,31 @@ pub(super) fn bounds(s: &mut Session, v: &Value) -> CmdResult {
     Ok(json!({"object": serde_json::to_value(o).unwrap_or(Value::Null), "pos": crate::cmd::pos_json(&pos)}))
 }
 
+/// `object.position`: the selected floating object (a chart or diagram too) moved so its top-left
+/// is at `x`, `y` on page `page` (its own page when left out), as dragging it does; its size and
+/// wrapping stay.
+pub(super) fn position(s: &mut Session, v: &Value) -> CmdResult {
+    let (pos, obj) = selected(s).ok_or_else(|| CmdError::Disabled("select a floating object first".into()))?;
+    if !obj.is_floating() {
+        return Err(CmdError::Disabled("only a floating object is placed by x and y".into()));
+    }
+    let coord = |k: &str| {
+        v.get(k)
+            .and_then(Value::as_f64)
+            .filter(|n| n.is_finite())
+            .map(|n| (n as f32).clamp(-MAX_OFFSET, MAX_OFFSET))
+            .ok_or_else(|| CmdError::Params(format!("`{k}` is required: points from the page's top-left")))
+    };
+    let (x, y) = (coord("x")?, coord("y")?);
+    let pos = move_object(s, pos, p::u64(v, "page"), x, y, obj_size(&obj))?;
+    select_object(s, &pos);
+    let hit = s.layout().object(&pos, s.page_hint).map(|h| (h.page, h.rect.x, h.rect.y));
+    Ok(match hit {
+        Some((page, x, y)) => json!({"pos": crate::cmd::pos_json(&pos), "page": page, "x": x, "y": y}),
+        None => json!({"pos": crate::cmd::pos_json(&pos)}),
+    })
+}
+
 /// The text position in `v`'s `to`, for an In Line with Text `obj` (a floating one is placed by
 /// `x`/`y`); None without one.
 fn text_target(v: &Value, obj: &InlineObject) -> Result<Option<Pos>, CmdError> {

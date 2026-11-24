@@ -56,6 +56,7 @@ pub(crate) fn write_parts(doc: &Document, flavor: Flavor) -> Result<Vec<(String,
             .enumerate()
             .flat_map(|(n, c)| c.iter().enumerate().map(move |(seq, id)| (*id, (n as u32 + 1, seq as u32))))
             .collect(),
+        chart_records: Vec::new(),
     };
     wr.assign_media();
     wr.embeds.reserve_media(wr.media_files.values());
@@ -255,6 +256,26 @@ pub(crate) fn write_parts(doc: &Document, flavor: Flavor) -> Result<Vec<(String,
             &mut overrides,
             "customXml/itemProps1.xml",
             bibliography_props_xml(),
+            "application/vnd.openxmlformats-officedocument.customXmlProperties+xml",
+            PartRels::default(),
+        );
+    }
+    // The charts' WordCraft-only settings, as a custom XML data part of the document (written
+    // again from the charts on every save: a deleted chart's record goes with it).
+    if !wr.chart_records.is_empty() {
+        let taken = |n: &str| entries.iter().any(|(e, _)| e.eq_ignore_ascii_case(n));
+        let free = (1u32..).find(|i| !taken(&format!("customXml/item{i}.xml")) && !taken(&format!("customXml/itemProps{i}.xml"))).unwrap_or(1);
+        let (item, props) = (format!("customXml/item{free}.xml"), format!("itemProps{free}.xml"));
+        root.add(rt::CUSTOM_XML, &item, false);
+        let mut item_rels = PartRels::default();
+        item_rels.add(rt::CUSTOM_XML_PROPS, &props, false);
+        let records = crate::chart_meta::part_xml(&wr.chart_records);
+        push_part(&mut entries, &mut overrides, &item, records, "application/vnd.openxmlformats-officedocument.customXml+xml", item_rels);
+        push_part(
+            &mut entries,
+            &mut overrides,
+            &format!("customXml/{props}"),
+            crate::chart_meta::props_xml(),
             "application/vnd.openxmlformats-officedocument.customXmlProperties+xml",
             PartRels::default(),
         );

@@ -186,6 +186,11 @@ pub struct Float {
     /// top. 0 = unknown, drawn in document order (objects inserted here, or from other formats).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub z: u32,
+    /// Locked in place: can't be moved, resized, turned, cropped, restacked or rewrapped, though its content and look can still be
+    /// edited (DrawingML `noMove` and `noResize` locks: `a:graphicFrameLocks`, `a:picLocks`,
+    /// `a:spLocks`).
+    #[serde(skip_serializing_if = "is_false")]
+    pub locked: bool,
 }
 
 /// Longest alternative text kept (characters): hostile files and commands are capped.

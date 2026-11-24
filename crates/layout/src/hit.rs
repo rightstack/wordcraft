@@ -410,7 +410,8 @@ impl DocLayout {
         // An empty section mark before a continuous break takes no room, so its line lies over the
         // first line of the next section (every column of it). On a tie the line with text wins;
         // otherwise a click on that first line always landed in the mark.
-        let nearest = |a: &&LineHit, b: &&LineHit| score(a, x, y).total_cmp(&score(b, x, y)).then((a.para.text_len == 0).cmp(&(b.para.text_len == 0)));
+        let nearest =
+            |a: &&LineHit, b: &&LineHit| score(a, x, y).total_cmp(&score(b, x, y)).then((a.para.text_len == 0).cmp(&(b.para.text_len == 0)));
         let best = lines.iter().filter(|l| !away(l.path)).min_by(nearest).or_else(|| lines.iter().min_by(nearest))?;
         let off = best.para.off_at_x(best.li, x - best.x);
         Some(Pos { story: best.story, path: best.path.clone(), off })

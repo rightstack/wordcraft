@@ -4,6 +4,18 @@ use super::{
     n, rt,
 };
 
+/// A drawing's `wp:cNvGraphicFramePr`: with `noMove` and `noResize` frame locks when the object
+/// is locked in place (ECMA-376 §20.1.2.2.19 `graphicFrameLocks`).
+pub(super) fn frame_pr(w: &mut W, float: &Float) {
+    if float.locked {
+        w.open("wp:cNvGraphicFramePr", &[]);
+        w.empty("a:graphicFrameLocks", &[("noMove", "1"), ("noResize", "1")]);
+        w.close("wp:cNvGraphicFramePr");
+    } else {
+        w.empty("wp:cNvGraphicFramePr", &[]);
+    }
+}
+
 pub(super) struct DrawingInfo<'a> {
     pub float: &'a Float,
     pub size: (f32, f32),
@@ -22,7 +34,11 @@ impl Writer<'_> {
         w.open("pic:nvPicPr", &[]);
         nv_props(w, "pic:cNvPr", "0", file, alt, &float.alt, float.hidden);
         w.open("pic:cNvPicPr", &[]);
-        w.empty("a:picLocks", &[("noChangeAspect", "1"), ("noChangeArrowheads", "1")]);
+        let mut locks = vec![("noChangeAspect", "1"), ("noChangeArrowheads", "1")];
+        if float.locked {
+            locks.extend([("noMove", "1"), ("noResize", "1")]);
+        }
+        w.empty("a:picLocks", &locks);
         w.close("pic:cNvPicPr");
         w.close("pic:nvPicPr");
         w.open("pic:blipFill", &[]);
@@ -68,10 +84,15 @@ impl Writer<'_> {
             } else {
                 w.empty("wps:cNvCnPr", &[]);
             }
-        } else if *kind == ShapeKind::TextBox {
-            w.empty("wps:cNvSpPr", &[("txBox", "1")]);
         } else {
-            w.empty("wps:cNvSpPr", &[]);
+            let attrs: &[(&str, &str)] = if *kind == ShapeKind::TextBox { &[("txBox", "1")] } else { &[] };
+            if float.locked {
+                w.open("wps:cNvSpPr", attrs);
+                w.empty("a:spLocks", &[("noMove", "1"), ("noResize", "1")]);
+                w.close("wps:cNvSpPr");
+            } else {
+                w.empty("wps:cNvSpPr", attrs);
+            }
         }
         w.open("wps:spPr", &[]);
         xfrm(w, off, *sw, *sh, float.spin());
@@ -213,8 +234,9 @@ impl Writer<'_> {
     pub(super) fn graphic_frame(&mut self, w: &mut W, info: DrawingInfo<'_>, graphic: &crate::xml::El) {
         let inline = info.float.wrap == Wrap::Inline;
         w.open("w:drawing", &[]);
+        let float = info.float;
         self.drawing_open(w, info);
-        w.empty("wp:cNvGraphicFramePr", &[]);
+        frame_pr(w, float);
         w.raw(&graphic.to_xml());
         w.close(if inline { "wp:inline" } else { "wp:anchor" });
         w.close("w:drawing");

@@ -24,24 +24,48 @@ pub(super) fn graphic_draws(doc: &Document, g: &Graphic, rect: Rect, alpha: f32)
                 dash: Vec::new(),
                 cap: Default::default(),
             }),
-            GraphicItem::Path { segs, fill, stroke, stroke_width } => {
-                let segs = page_segs(segs, |x, y| (rect.x + x * sx, rect.y + y * sy));
-                out.push(Draw::Path {
-                    segs,
-                    fill: fill.map(Paint::solid),
-                    stroke: *stroke,
-                    stroke_width: stroke_width * k,
-                    dash: Vec::new(),
-                    cap: Default::default(),
-                })
+            GraphicItem::Path { segs, fill, stroke, stroke_width, gradient } => {
+                let map = |x: f32, y: f32| (rect.x + x * sx, rect.y + y * sy);
+                let segs = page_segs(segs, map);
+                let paint = gradient.as_ref().and_then(|g| gradient_paint(g, map)).or_else(|| fill.map(Paint::solid));
+                out.push(Draw::Path { segs, fill: paint, stroke: *stroke, stroke_width: stroke_width * k, dash: Vec::new(), cap: Default::default() })
             }
-            GraphicItem::Text { rect: r, .. } => out.extend(text_glyphs(doc, inside(r), it, alpha, k)),
+            GraphicItem::Text { rect: r, rotation, .. } => {
+                let at = inside(r);
+                let glyphs = text_glyphs(doc, at, it, alpha, k);
+                let turn = if rotation.is_finite() { Spin::new(*rotation, false, false) } else { Spin::default() };
+                spun(turn, at, glyphs, &mut out);
+            }
             GraphicItem::Image { rect: r, media } => {
                 out.push(Draw::Image { rect: inside(r), media: media.clone(), crop: [0.0; 4], alpha, alt: String::new(), decorative: false })
             }
         }
     }
     out
+}
+
+/// Most stops of an item's gradient drawn; the rest are left out.
+const MAX_STOPS: usize = 64;
+
+/// An item's linear gradient as a paint in page coordinates (`map` from the graphic's): stops in
+/// order, offsets and opacities held to 0..1. `None` (the item's plain fill is used) when its
+/// ends aren't finite and distinct or it has no stop.
+fn gradient_paint(g: &wordcraft_doc::graphic::LinearGradient, map: impl Fn(f32, f32) -> (f32, f32)) -> Option<Paint> {
+    let (p0, p1) = (map(g.from[0], g.from[1]), map(g.to[0], g.to[1]));
+    let fin = |p: (f32, f32)| p.0.is_finite() && p.1.is_finite();
+    if !(fin(p0) && fin(p1)) || (p0.0 - p1.0).hypot(p0.1 - p1.1) < 1e-6 {
+        return None;
+    }
+    let unit = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
+    let mut stops: Vec<(f32, Rgb, f32)> = g.stops.iter().take(MAX_STOPS).map(|s| (unit(s.offset), s.color, unit(s.alpha))).collect();
+    if stops.is_empty() {
+        return None;
+    }
+    stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+    if g.radial {
+        return Some(Paint::Radial { c: p0, r: (p0.0 - p1.0).hypot(p0.1 - p1.1), stops });
+    }
+    Some(Paint::Linear { p0, p1, stops })
 }
 
 /// Scale from the size `built` points a graphic's items were made for to `len` points; 1 when
@@ -275,7 +299,7 @@ pub fn seg_path(segs: &[PathSeg]) -> BezPath {
 /// or the item's rectangle or size isn't a finite number (a degenerate scale: `r` itself is always
 /// finite, as [`Rect::new`] makes it).
 fn text_glyphs(doc: &Document, r: Rect, it: &GraphicItem, alpha: f32, k: f32) -> Vec<Draw> {
-    let GraphicItem::Text { rect, text, size, color, bold, align, font } = it else { return Vec::new() };
+    let GraphicItem::Text { rect, text, size, color, bold, align, font, .. } = it else { return Vec::new() };
     let size = *size * k;
     if !rect.iter().chain([&size]).all(|v| v.is_finite()) {
         return Vec::new();

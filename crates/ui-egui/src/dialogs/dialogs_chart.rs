@@ -114,6 +114,18 @@ pub fn preview(p: &egui::Painter, r: Rect, kind: ChartType, col: [Color32; 3], l
     let bar = |x0: f32, y0: f32, x1: f32, y1: f32, c: Color32| p.rect_filled(Rect::from_min_max(at(x0, y0), at(x1, y1)), 0.0, c);
     let axis = Stroke::new(1.0, line);
     let data: [[f32; 4]; 3] = [[0.45, 0.6, 0.5, 0.8], [0.3, 0.4, 0.65, 0.5], [0.2, 0.3, 0.35, 0.6]];
+    // Types without a picture of their own show the nearest one.
+    let kind = match kind {
+        ChartType::ColumnPercent | ChartType::Waterfall => ChartType::ColumnStacked,
+        ChartType::BarPercent | ChartType::Funnel => ChartType::BarStacked,
+        ChartType::AreaPercent => ChartType::AreaStacked,
+        ChartType::LineStacked | ChartType::LinePercent | ChartType::Radar | ChartType::RadarMarkers => ChartType::Line,
+        ChartType::RadarFilled => ChartType::Area,
+        ChartType::ScatterLines | ChartType::ScatterSmooth | ChartType::Bubble => ChartType::Scatter,
+        ChartType::Combo => ChartType::Column,
+        ChartType::PieOfPie | ChartType::BarOfPie => ChartType::Pie,
+        k => k,
+    };
     match kind {
         ChartType::Column | ChartType::ColumnStacked | ChartType::Bar | ChartType::BarStacked => {
             let stacked = matches!(kind, ChartType::ColumnStacked | ChartType::BarStacked);
@@ -141,19 +153,32 @@ pub fn preview(p: &egui::Painter, r: Rect, kind: ChartType, col: [Color32; 3], l
                 p.line_segment([at(0.0, 1.0), at(1.0, 1.0)], axis);
             }
         }
-        ChartType::Line | ChartType::Area => {
+        ChartType::Line | ChartType::Area | ChartType::AreaStacked => {
+            let stacked = kind == ChartType::AreaStacked;
+            let mut base = [0.0f32; 4];
             for (j, c) in col.iter().enumerate().take(2) {
                 let Some(d) = data.get(j) else { continue };
-                let pts: Vec<Pos2> = d.iter().enumerate().map(|(i, v)| at(i as f32 / 3.0, 1.0 - v)).collect();
-                if kind == ChartType::Area {
-                    // Convex strips between neighbouring points.
-                    for w in pts.windows(2) {
+                let tops: Vec<f32> = d.iter().zip(base).map(|(v, b)| if stacked { b + v * 0.5 } else { *v }).collect();
+                let pts: Vec<Pos2> = tops.iter().enumerate().map(|(i, v)| at(i as f32 / 3.0, 1.0 - v)).collect();
+                if kind == ChartType::Line {
+                    p.add(Shape::line(pts, Stroke::new(2.0, *c)));
+                } else {
+                    // Strips between neighbouring points, down to the series below (or the axis).
+                    for (i, w) in pts.windows(2).enumerate() {
                         if let [a, b] = w {
-                            p.add(Shape::convex_polygon(vec![*a, *b, pos2(b.x, r.bottom()), pos2(a.x, r.bottom())], *c, Stroke::NONE));
+                            let (b0, b1) = (base.get(i).copied().unwrap_or(0.0), base.get(i + 1).copied().unwrap_or(0.0));
+                            p.add(Shape::convex_polygon(
+                                vec![*a, *b, at((i + 1) as f32 / 3.0, 1.0 - b1), at(i as f32 / 3.0, 1.0 - b0)],
+                                *c,
+                                Stroke::NONE,
+                            ));
                         }
                     }
-                } else {
-                    p.add(Shape::line(pts, Stroke::new(2.0, *c)));
+                }
+                if stacked {
+                    for (b, t) in base.iter_mut().zip(&tops) {
+                        *b = *t;
+                    }
                 }
             }
             p.line_segment([at(0.0, 1.0), at(1.0, 1.0)], axis);
@@ -190,6 +215,8 @@ pub fn preview(p: &egui::Painter, r: Rect, kind: ChartType, col: [Color32; 3], l
             p.line_segment([at(0.0, 1.0), at(1.0, 1.0)], axis);
             p.line_segment([at(0.0, 0.0), at(0.0, 1.0)], axis);
         }
+        // Mapped to one of the above.
+        _ => {}
     }
 }
 

@@ -136,6 +136,8 @@ pub(crate) struct Writer<'d> {
     /// Linked text boxes: part id → (`wps:txbx`/`wps:linkedTxbx` id, seq; 0 for the box holding
     /// the text).
     txbx_links: HashMap<u32, (u32, u32)>,
+    /// The charts' WordCraft-only settings, for the document-level records part.
+    chart_records: Vec<crate::chart_meta::Record>,
 }
 
 const CT_WML: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.";

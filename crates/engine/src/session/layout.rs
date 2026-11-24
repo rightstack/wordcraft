@@ -2,9 +2,103 @@ use super::doc_state::{Selection, TypedWord, typed_range};
 use super::locale::SYSTEM_LOCALE;
 use super::snapshot_types::LayoutEntry;
 use super::view::DRAFT_WIDTH;
-use super::{Arc, DocLayout, Document, LayoutCache, LayoutOptions, Session, StoryRef, Value, ViewMode};
+use super::{Arc, DocLayout, Document, LayoutCache, LayoutOptions, Pos, Session, StoryRef, Value, ViewMode};
 
 impl Session {
+    /// Draw the chart at `at` with `graphic` instead of its own until the preview ends
+    /// ([`Session::end_chart_preview`]). Not an edit: the document, its undo history and its
+    /// unsaved-changes flag stay as they are; only the revision the layout is keyed on moves, so
+    /// the page is laid out (and drawn) again.
+    pub fn set_chart_preview(&mut self, at: Pos, graphic: Arc<wordcraft_doc::graphic::Graphic>) {
+        self.chart_preview = Some((at, graphic));
+        self.rev = self.rev.wrapping_add(1);
+    }
+
+    /// End a chart preview, if one is showing: the chart is drawn as it is again (the layout's
+    /// revision moves, nothing else). Every command but `chart.preview` ends it first.
+    pub fn end_chart_preview(&mut self) {
+        if self.chart_preview.take().is_some() {
+            self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
+    /// End a chart preview before command `id` runs when that command edits (a real colour change
+    /// among them), is Undo, Redo or Repeat (`edit.*`, registered as not editing) or a file
+    /// command (Save, Export). Read-only commands (the state queries a front end makes after
+    /// every command) leave it; one that moves the selection off the chart ends it when the page
+    /// is laid out next.
+    pub(super) fn end_chart_preview_before(&mut self, id: &str) {
+        let ends = id != "chart.preview" && (id.starts_with("file.") || id.starts_with("edit.") || self.registry.get(id).is_some_and(|c| c.mutates));
+        if ends {
+            self.end_chart_preview();
+        }
+    }
+
+    /// Whether a chart preview is showing: one is set, the selection still holds its chart and
+    /// that chart is unchanged.
+    pub fn chart_previewing(&self) -> bool {
+        self.shown_chart_preview().is_some()
+    }
+
+    /// The chart preview, while it still applies (see [`Session::chart_previewing`]).
+    fn shown_chart_preview(&self) -> Option<&(Pos, Arc<wordcraft_doc::graphic::Graphic>)> {
+        self.chart_preview
+            .as_ref()
+            .filter(|(at, graphic)| crate::cmd::objects::selected(self).is_some_and(|(p, _)| p == *at) && self.doc_chart_matches(at, graphic))
+    }
+
+    /// The previewed graphic, while the selection still holds the chart it was made for and that
+    /// chart is unchanged; `None` (and the preview ends) once either moved on.
+    fn live_chart_preview(&mut self) -> Option<(Pos, Arc<wordcraft_doc::graphic::Graphic>)> {
+        self.chart_preview.as_ref()?;
+        let shown = self.shown_chart_preview().cloned();
+        if shown.is_none() {
+            self.end_chart_preview();
+        }
+        shown
+    }
+
+    /// The document to draw pages from ([`wordcraft_layout::display::page_display`]): the
+    /// document itself, or while a chart preview shows, a copy with the previewed chart in its
+    /// place (inline objects are drawn from the document, not the layout). Saving and exporting
+    /// use [`Session::doc`], which never holds a preview.
+    pub fn display_doc(&self) -> std::borrow::Cow<'_, Document> {
+        match self.shown_chart_preview().and_then(|(at, graphic)| self.swapped_doc(at, graphic.clone(), false)) {
+            Some(doc) => std::borrow::Cow::Owned(doc),
+            None => std::borrow::Cow::Borrowed(&self.doc),
+        }
+    }
+
+    /// A copy of the document with `graphic` in place of the chart at `at` (its paragraph touched
+    /// when `touch`, for the layout cache).
+    fn swapped_doc(&self, at: &Pos, graphic: Arc<wordcraft_doc::graphic::Graphic>, touch: bool) -> Option<Document> {
+        let mut doc = self.doc.clone();
+        let para = doc.para_mut(at.story, &at.path).ok()?;
+        match para.object_at_mut(at.off) {
+            Some(wordcraft_doc::InlineObject::Graphic { graphic: g, .. }) => *g = graphic,
+            _ => return None,
+        }
+        if touch {
+            para.touch();
+        }
+        Some(doc)
+    }
+
+    /// Whether the chart at `at` is still the one `preview` was made from: its model is the
+    /// preview's except for the colours, and it is drawn at the preview's size.
+    fn doc_chart_matches(&self, at: &Pos, preview: &wordcraft_doc::graphic::Graphic) -> bool {
+        let Some(p) = self.doc.para_at(at) else { return false };
+        let Some(wordcraft_doc::InlineObject::Graphic { graphic, .. }) = p.object_at(at.off) else { return false };
+        match (graphic.chart.as_deref(), preview.chart.as_deref()) {
+            (Some(real), Some(shown)) => {
+                let mut same = shown.clone();
+                same.colors.clone_from(&real.colors);
+                same == *real && graphic.w == preview.w && graphic.h == preview.h
+            }
+            _ => false,
+        }
+    }
+
     /// The current layout (recomputed when the document or view changed).
     pub fn layout(&mut self) -> Arc<DocLayout> {
         let typing = self.typing_word();
@@ -13,6 +107,8 @@ impl Session {
 
     /// [`Session::layout`] with `typing` as the word being typed.
     fn layout_with(&mut self, typing: Option<wordcraft_layout::TypingWord>) -> Arc<DocLayout> {
+        // Before the revision is read: a preview that no longer applies ends here (and moves it).
+        let preview = self.live_chart_preview();
         let mode = if self.view.read_mode { ViewMode::Read } else { self.view.mode };
         let width = match mode {
             ViewMode::Read => self.view.read_width,
@@ -72,7 +168,10 @@ impl Session {
             filename: filename.clone(),
             filepath: filepath.clone(),
         };
-        let l = Arc::new(wordcraft_layout::layout(&self.doc, &mut self.cache, &opts));
+        // A chart preview: the document laid out with the previewed graphic in the chart's place
+        // (its paragraph touched, so it is laid out again). The document itself is untouched.
+        let previewed = preview.and_then(|(at, graphic)| self.swapped_doc(&at, graphic, true));
+        let l = Arc::new(wordcraft_layout::layout(previewed.as_ref().unwrap_or(&self.doc), &mut self.cache, &opts));
         let [newest, _] = std::mem::take(&mut self.layout);
         self.layout = [
             Some((self.rev, width, height, mode, spacing, l.clone(), self.view.proofing, outline, deleted, self.view.numeral, typing, shown)),

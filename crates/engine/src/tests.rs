@@ -6663,6 +6663,342 @@ fn chart_edits_are_one_undo_step_each() {
 }
 
 #[test]
+fn chart_style_commands_edit_undo_and_save() {
+    use wordcraft_doc::chart::{ChartType, Gridlines};
+    let mut s = s();
+    let r = run(
+        &mut s,
+        "insert.chart",
+        json!({"type": "areaStacked", "colors": ["#111111", "777777"], "gridlines": "dashed", "axisMin": 0, "axisMax": 20, "axisStep": 5}),
+    );
+    assert_eq!(r["chart"]["type"], "areaStacked");
+    assert_eq!(r["chart"]["colors"], json!(["111111", "777777"]));
+    let c = first_chart(&s.doc).unwrap();
+    assert_eq!(
+        (c.kind, c.gridlines, c.axis_min, c.axis_max, c.axis_step),
+        (ChartType::AreaStacked, Gridlines::Dashed, Some(0.0), Some(20.0), Some(5.0))
+    );
+    run(&mut s, "chart.type", json!({"type": "line"}));
+    run(&mut s, "chart.line", json!({"smooth": true}));
+    run(&mut s, "chart.line", json!({"markers": true}));
+    run(&mut s, "chart.colors", json!({"colors": ["000000", "555555", "aaaaaa"]}));
+    run(&mut s, "chart.gridlines", json!({"style": "none"}));
+    run(&mut s, "chart.axis", json!({"max": null, "step": 2}));
+    let c = first_chart(&s.doc).unwrap();
+    assert!(c.smooth && c.markers, "a field left out stays");
+    assert_eq!(c.colors.len(), 3);
+    assert_eq!((c.gridlines, c.axis_min, c.axis_max, c.axis_step), (Gridlines::None, Some(0.0), None, Some(2.0)));
+    // Saved and reopened as the same editable chart.
+    let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
+    assert_eq!(first_chart(&back), Some(c.clone()));
+    // Every edit is one undo step.
+    let steps: [&dyn Fn(&wordcraft_doc::chart::ChartSpec) -> bool; 6] = [
+        &|c| c.axis_max == Some(20.0) && c.axis_step == Some(5.0),
+        &|c| c.gridlines == Gridlines::Dashed,
+        &|c| c.colors == ["111111", "777777"],
+        &|c| c.smooth && !c.markers,
+        &|c| !c.smooth,
+        &|c| c.kind == ChartType::AreaStacked,
+    ];
+    for (k, check) in steps.iter().enumerate() {
+        run(&mut s, "edit.undo", json!({}));
+        assert!(check(&first_chart(&s.doc).unwrap()), "undo step {k}");
+    }
+    // Back to the theme's colours.
+    run(&mut s, "chart.colors", json!({"colors": null}));
+    assert!(first_chart(&s.doc).unwrap().colors.is_empty());
+    run(&mut s, "chart.colors", json!({"colors": ["123456"]}));
+    run(&mut s, "chart.colors", json!({"colors": []}));
+    assert!(first_chart(&s.doc).unwrap().colors.is_empty());
+    // Bad params are errors and change nothing.
+    let before = first_chart(&s.doc).unwrap();
+    for (id, bad) in [
+        ("chart.colors", json!({})),
+        ("chart.colors", json!({"colors": "000000"})),
+        ("chart.colors", json!({"colors": ["12345"]})),
+        ("chart.colors", json!({"colors": ["gggggg"]})),
+        ("chart.colors", json!({"colors": [5]})),
+        ("chart.colors", json!({"colors": vec!["000000"; 65]})),
+        ("chart.line", json!({"smooth": "yes"})),
+        ("chart.bars", json!({})),
+        ("chart.bars", json!({"rounded": 1})),
+        ("chart.gridlines", json!({})),
+        ("chart.gridlines", json!({"style": "dotted"})),
+        ("chart.axis", json!({"min": 5, "max": 5})),
+        ("chart.axis", json!({"min": 10, "max": 1})),
+        ("chart.axis", json!({"step": 0})),
+        ("chart.axis", json!({"step": -1})),
+        ("chart.axis", json!({"min": "x"})),
+        ("chart.type", json!({"type": "areaStack"})),
+    ] {
+        assert!(matches!(s.run(id, &bad), Err(crate::CmdError::Params(_))), "{id} {bad}");
+    }
+    run(&mut s, "chart.axis", json!({"min": 3}));
+    assert!(matches!(s.run("chart.axis", &json!({"max": 2})), Err(crate::CmdError::Params(_))), "max below the kept min");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(first_chart(&s.doc), Some(before));
+    for bad in [json!({"type": "line", "gridlines": 3}), json!({"type": "line", "axisMin": 2, "axisMax": 1}), json!({"type": "line", "colors": {}})] {
+        assert!(matches!(s.run("insert.chart", &bad), Err(crate::CmdError::Params(_))), "{bad}");
+    }
+    // Huge numbers are clamped, not errors.
+    run(&mut s, "chart.axis", json!({"min": -1e300, "max": 1e300}));
+    let c = first_chart(&s.doc).unwrap();
+    assert_eq!((c.axis_min, c.axis_max), (Some(-wordcraft_doc::chart::MAX_AXIS), Some(wordcraft_doc::chart::MAX_AXIS)));
+    let _ = s.layout();
+}
+
+#[test]
+fn selected_chart_plot_is_the_drawn_plot_area() {
+    use crate::cmd::chart::{DEFAULT_H, DEFAULT_W, selected_chart_plot};
+    let mut s = s();
+    assert_eq!(selected_chart_plot(&s), None, "nothing selected");
+    for kind in ["column", "pie"] {
+        run(&mut s, "insert.chart", json!({"type": kind}));
+        let r = selected_chart_plot(&s).expect("a plot rect");
+        let spec = crate::cmd::chart::selected_chart(&s).unwrap();
+        let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+        let Some(wordcraft_doc::para::InlineObject::Graphic { graphic, .. }) = p.object_offsets().into_iter().find_map(|o| p.object_at(o)) else {
+            panic!()
+        };
+        let (w, h) = (graphic.w, graphic.h);
+        assert!(w <= DEFAULT_W && h == DEFAULT_H);
+        assert!(r[0] >= 0.0 && r[1] >= 0.0 && r[0] + r[2] <= w && r[1] + r[3] <= h && r[2] > 0.0 && r[3] > 0.0, "{kind}: {r:?}");
+        assert_eq!(Some(r), wordcraft_docx::chart_plot_rect(&spec, &s.doc.settings.theme_colors, w, h), "same layout as the drawing");
+        run(&mut s, "edit.undo", json!({}));
+    }
+}
+
+#[test]
+fn resizing_a_chart_lays_it_out_again_in_one_undo_step() {
+    use crate::cmd::chart::{selected_chart, selected_chart_plot};
+    use wordcraft_doc::graphic::GraphicItem;
+    let graphic = |s: &Session| {
+        let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+        match p.object_offsets().into_iter().find_map(|o| p.object_at(o)) {
+            Some(wordcraft_doc::para::InlineObject::Graphic { w, h, graphic, .. }) => (*w, *h, graphic.clone()),
+            _ => panic!("no graphic"),
+        }
+    };
+    let mut s = s();
+    run(&mut s, "insert.chart", json!({"type": "column", "legend": "right"}));
+    let spec = selected_chart(&s).unwrap();
+    let (w0, h0, _) = graphic(&s);
+    let plot0 = selected_chart_plot(&s).unwrap();
+    run(&mut s, "picture.size", json!({"width": 300, "height": 150, "lockAspect": false}));
+    let (w, h, g) = graphic(&s);
+    assert_eq!((w, h, g.w, g.h), (300.0, 150.0, 300.0, 150.0));
+    assert_eq!(selected_chart(&s), Some(spec.clone()), "the model is unchanged");
+    // Laid out again, not stretched: every item (axes, legend, labels) inside the new box.
+    for it in &g.items {
+        let (x0, y0, x1, y1) = match it {
+            GraphicItem::Shape { rect, .. } | GraphicItem::Text { rect, .. } => (rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]),
+            GraphicItem::Path { segs, .. } => {
+                segs.iter().fold((f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY), |b, sg| match sg {
+                    wordcraft_doc::graphic::PathSeg::Move(x, y) | wordcraft_doc::graphic::PathSeg::Line(x, y) => {
+                        (b.0.min(*x), b.1.min(*y), b.2.max(*x), b.3.max(*y))
+                    }
+                    _ => b,
+                })
+            }
+            GraphicItem::Image { .. } => continue,
+        };
+        assert!(x0 >= -0.01 && y0 >= -0.01 && x1 <= 300.01 && y1 <= 150.01, "{it:?} outside 300x150");
+    }
+    assert!(g.items.iter().any(|it| matches!(it, GraphicItem::Text { text, .. } if text == "Series 1")), "the legend is drawn");
+    let plot = selected_chart_plot(&s).unwrap();
+    assert_ne!(plot, plot0);
+    assert!(plot[0] + plot[2] <= 300.0 && plot[1] + plot[3] <= 150.0, "{plot:?}");
+    assert_eq!(Some(plot), wordcraft_docx::chart_plot_rect(&spec, &s.doc.settings.theme_colors, 300.0, 150.0));
+    run(&mut s, "edit.undo", json!({}));
+    let (w, h, g) = graphic(&s);
+    assert_eq!((w, h, g.w, g.h), (w0, h0, w0, h0), "one undo step");
+    assert_eq!(selected_chart_plot(&s), Some(plot0));
+}
+
+/// The fill colours the first page draws (charts' figures opened up).
+fn page_fills(s: &mut Session) -> Vec<wordcraft_doc::props::Rgb> {
+    use wordcraft_layout::display::{Draw, Paint, page_display};
+    fn walk(d: &Draw, out: &mut Vec<wordcraft_doc::props::Rgb>) {
+        match d {
+            Draw::Figure { draws: items, .. } | Draw::Turned { items, .. } | Draw::Rotated { items, .. } | Draw::Clip { items, .. } => {
+                items.iter().for_each(|x| walk(x, out))
+            }
+            Draw::Path { fill: Some(Paint::Solid(c, _)), .. } | Draw::Shape { fill: Some(Paint::Solid(c, _)), .. } => out.push(*c),
+            _ => {}
+        }
+    }
+    let l = s.layout();
+    let mut out = Vec::new();
+    // Pages are drawn from the display document (the chart preview swapped in), as the UI must.
+    for d in page_display(&s.display_doc(), &l.pages[0], &Default::default()) {
+        walk(&d, &mut out);
+    }
+    out
+}
+
+#[test]
+fn chart_preview_redraws_without_editing() {
+    use wordcraft_doc::props::Rgb;
+    let pink = Rgb(0xFF, 0x00, 0x99);
+    let mut s = s();
+    run(&mut s, "insert.chart", json!({"type": "column", "colors": ["112233"]}));
+    let real = first_chart(&s.doc).unwrap();
+    let (labels, dirty, xml) = (s.undo_labels(), s.dirty, wordcraft_docx::write(&s.doc).unwrap());
+    let rev = s.rev();
+    assert!(page_fills(&mut s).contains(&Rgb(0x11, 0x22, 0x33)) && !page_fills(&mut s).contains(&pink));
+
+    // Preview: drawn in the new colours; the model, undo, dirty flag and saved file are as they were.
+    let r = run(&mut s, "chart.preview", json!({"colors": ["ff0099"]}));
+    assert_eq!(r["previewing"], true);
+    assert!(crate::cmd::chart::chart_previewing(&s));
+    assert!(s.rev() != rev, "the page is laid out again");
+    let fills = page_fills(&mut s);
+    assert!(fills.contains(&pink) && !fills.contains(&Rgb(0x11, 0x22, 0x33)), "drawn in the preview colours");
+    assert_eq!(first_chart(&s.doc), Some(real.clone()), "the real colours stay in the model");
+    assert_eq!((s.undo_labels(), s.dirty), (labels.clone(), dirty));
+    assert_eq!(wordcraft_docx::write(&s.doc).unwrap(), xml, "a save writes the real chart");
+
+    // null ends it.
+    run(&mut s, "chart.preview", json!({"colors": null}));
+    assert!(!crate::cmd::chart::chart_previewing(&s));
+    assert!(page_fills(&mut s).contains(&Rgb(0x11, 0x22, 0x33)) && !page_fills(&mut s).contains(&pink));
+    assert_eq!((s.undo_labels(), s.dirty, first_chart(&s.doc)), (labels.clone(), dirty, Some(real.clone())));
+
+    // An edit ends it first: a title change keeps the real colours.
+    run(&mut s, "chart.preview", json!({"colors": ["ff0099"]}));
+    // Read-only queries (what a front end asks after every command) leave it.
+    let _ = s.run("format.state", &json!({}));
+    assert!(crate::cmd::chart::chart_previewing(&s) && page_fills(&mut s).contains(&pink));
+    run(&mut s, "chart.title", json!({"text": "Sales"}));
+    assert!(!crate::cmd::chart::chart_previewing(&s));
+    assert_eq!(first_chart(&s.doc).unwrap().colors, ["112233"]);
+    assert!(!page_fills(&mut s).contains(&pink));
+    assert_eq!(s.undo_labels().len(), labels.len() + 1, "one step: the title");
+    // Saving (a command) ends it too.
+    run(&mut s, "chart.preview", json!({"colors": ["ff0099"]}));
+    let path = std::env::temp_dir().join(format!("wc-chart-preview-{}.docx", std::process::id()));
+    run(&mut s, "file.saveAs", json!({"path": path.to_string_lossy()}));
+    assert!(!crate::cmd::chart::chart_previewing(&s));
+    let back = wordcraft_docx::read(&std::fs::read(&path).unwrap()).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first_chart(&back).unwrap().colors, ["112233"]);
+    // Undo ends it, and undoes the title, not the preview.
+    run(&mut s, "chart.preview", json!({"colors": ["ff0099"]}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!crate::cmd::chart::chart_previewing(&s) && first_chart(&s.doc).unwrap().title.is_none());
+
+    // Selecting something else ends it, even when the selection is set directly (no command).
+    let obj = wordcraft_doc::para::OBJ.len_utf8();
+    s.sel = crate::Selection::caret(Pos::body(0, obj));
+    run(&mut s, "text.insert", json!({"text": " after the chart"}));
+    run(&mut s, "select.range", json!({"anchor": Pos::body(0, 0), "focus": Pos::body(0, obj)}));
+    run(&mut s, "chart.preview", json!({"colors": ["ff0099"]}));
+    assert!(page_fills(&mut s).contains(&pink));
+    s.sel = crate::Selection::caret(Pos::body(0, obj + 6));
+    assert!(!page_fills(&mut s).contains(&pink));
+    assert!(!crate::cmd::chart::chart_previewing(&s));
+
+    // Without a chart selected it is disabled; bad colours are params errors.
+    assert!(matches!(s.run("chart.preview", &json!({"colors": ["ff0099"]})), Err(crate::CmdError::Disabled(_))));
+    let mut c = self::s();
+    run(&mut c, "insert.chart", json!({"type": "column"}));
+    for bad in [json!({}), json!({"colors": ["nothex"]}), json!({"colors": 5})] {
+        assert!(matches!(c.run("chart.preview", &bad), Err(crate::CmdError::Params(_))), "{bad}");
+    }
+}
+
+#[test]
+fn chart_elements_switch_pieces_on_and_off_in_one_step() {
+    let mut s = s();
+    run(&mut s, "insert.chart", json!({"type": "column", "title": "Sales"}));
+    let r = run(&mut s, "chart.elements", json!({"titleVisible": false, "valLabels": false, "background": true}));
+    for (k, v) in [("titleVisible", false), ("background", true), ("catLabels", true), ("catAxis", true), ("valLabels", false), ("valAxis", true)] {
+        assert_eq!(r["chart"][k], v, "{k} in the chart JSON");
+    }
+    let c = first_chart(&s.doc).unwrap();
+    assert_eq!(c.title.as_deref(), Some("Sales"), "a hidden title keeps its text");
+    // Saved and reopened as the same chart.
+    let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
+    assert_eq!(first_chart(&back), Some(c.clone()));
+    // Fields left out stay; one undo step per command.
+    run(&mut s, "chart.elements", json!({"catAxis": false}));
+    let c2 = first_chart(&s.doc).unwrap();
+    assert!(!c2.cat_axis && !c2.title_visible && c2.background && !c2.val_labels);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(first_chart(&s.doc), Some(c.clone()));
+    run(&mut s, "edit.undo", json!({}));
+    let c0 = first_chart(&s.doc).unwrap();
+    assert!(c0.title_visible && !c0.background && c0.val_labels);
+    // Chart Title shows a hidden title again, with its text.
+    run(&mut s, "chart.elements", json!({"titleVisible": false}));
+    run(&mut s, "chart.title", json!({}));
+    let t = first_chart(&s.doc).unwrap();
+    assert_eq!((t.title.as_deref(), t.title_visible), (Some("Sales"), true));
+    for bad in [json!({}), json!({"background": "yes"}), json!({"catLabels": 1}), json!({"other": true})] {
+        assert!(matches!(s.run("chart.elements", &bad), Err(crate::CmdError::Params(_))), "{bad}");
+    }
+    // Disabled without a chart selected.
+    let mut plain = self::s();
+    assert!(matches!(plain.run("chart.elements", &json!({"background": true})), Err(crate::CmdError::Disabled(_))));
+}
+
+#[test]
+fn legend_key_shape_is_set_undone_and_saved() {
+    use wordcraft_doc::chart::LegendShape;
+    let mut s = s();
+    let r = run(&mut s, "insert.chart", json!({"type": "pie", "legendShape": "circle"}));
+    assert_eq!(r["chart"]["legendShape"], "circle");
+    run(&mut s, "chart.legendShape", json!({"shape": "square"}));
+    assert_eq!(first_chart(&s.doc).unwrap().legend_shape, LegendShape::Square);
+    run(&mut s, "edit.undo", json!({}));
+    let c = first_chart(&s.doc).unwrap();
+    assert_eq!(c.legend_shape, LegendShape::Circle);
+    let bytes = wordcraft_docx::write(&s.doc).unwrap();
+    assert_eq!(first_chart(&wordcraft_docx::read(&bytes).unwrap()), Some(c.clone()));
+    for bad in [json!({}), json!({"shape": "dot"}), json!({"shape": 1})] {
+        assert!(matches!(s.run("chart.legendShape", &bad), Err(crate::CmdError::Params(_))), "{bad}");
+    }
+    assert_eq!(first_chart(&s.doc), Some(c));
+    assert!(s.run("insert.chart", &json!({"type": "pie", "legendShape": "star"})).is_err());
+}
+
+#[test]
+fn rounded_bars_are_set_undone_and_saved() {
+    let mut s = s();
+    let r = run(&mut s, "insert.chart", json!({"type": "column", "roundedBars": true}));
+    assert_eq!(r["chart"]["roundedBars"], true);
+    run(&mut s, "chart.bars", json!({"rounded": false}));
+    assert!(!first_chart(&s.doc).unwrap().rounded_bars);
+    run(&mut s, "edit.undo", json!({}));
+    let c = first_chart(&s.doc).unwrap();
+    assert!(c.rounded_bars);
+    let bytes = wordcraft_docx::write(&s.doc).unwrap();
+    assert_eq!(first_chart(&wordcraft_docx::read(&bytes).unwrap()), Some(c));
+    assert!(s.run("insert.chart", &json!({"type": "bar", "roundedBars": "yes"})).is_err());
+    // The series gap: on its own, together with rounding, clamped, undone, saved.
+    run(&mut s, "chart.bars", json!({"gap": 30}));
+    let c = first_chart(&s.doc).unwrap();
+    assert!(c.rounded_bars && c.series_gap == 30.0, "a field left out stays");
+    run(&mut s, "chart.bars", json!({"gap": 150, "rounded": false}));
+    let c = first_chart(&s.doc).unwrap();
+    assert!(!c.rounded_bars && c.series_gap == 100.0);
+    run(&mut s, "chart.bars", json!({"gap": -5}));
+    assert_eq!(first_chart(&s.doc).unwrap().series_gap, 0.0);
+    run(&mut s, "edit.undo", json!({}));
+    let c = first_chart(&s.doc).unwrap();
+    assert_eq!(c.series_gap, 100.0);
+    let bytes = wordcraft_docx::write(&s.doc).unwrap();
+    assert_eq!(first_chart(&wordcraft_docx::read(&bytes).unwrap()), Some(c.clone()));
+    for bad in [json!({}), json!({"gap": "wide"}), json!({"gap": true}), json!({"rounded": null, "gap": null})] {
+        assert!(matches!(s.run("chart.bars", &bad), Err(crate::CmdError::Params(_))), "{bad}");
+    }
+    assert_eq!(first_chart(&s.doc), Some(c));
+    let r = run(&mut s, "insert.chart", json!({"type": "column", "seriesGap": 12.4}));
+    assert_eq!(r["chart"]["seriesGap"], 12.0);
+    assert!(s.run("insert.chart", &json!({"type": "column", "seriesGap": "x"})).is_err());
+}
+
+#[test]
 fn hostile_chart_data_is_capped() {
     use wordcraft_doc::chart::{MAX_CELLS, MAX_POINTS, MAX_SERIES, MAX_TEXT};
     let mut s = s();
@@ -6681,7 +7017,7 @@ fn hostile_chart_data_is_capped() {
     let _ = s.layout();
     let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
     assert_eq!(first_chart(&back), Some(c));
-    for bad in [json!({"type": "radar"}), json!({"data": {"series": 5}}), json!({"data": {"series": []}})] {
+    for bad in [json!({"type": "stock"}), json!({"data": {"series": 5}}), json!({"data": {"series": []}})] {
         assert!(s.run("insert.chart", &bad).is_err(), "{bad}");
     }
     // A chart without a model (from another program) is shown, not edited.
@@ -11650,4 +11986,385 @@ fn export_png_rejects_a_page_number_that_does_not_fit() {
     assert!(matches!(r, Err(crate::CmdError::Params(_))), "page u64::MAX: {r:?}");
     assert!(!target.exists(), "no file is written for an invalid page");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn chart_style_sets_any_subset_of_the_look_in_one_step() {
+    use wordcraft_doc::chart::{CatLabelPos, ChartType, TextStyle};
+    let mut s = s();
+    run(&mut s, "insert.chart", json!({"type": "area", "title": "Sales", "dataLabels": true}));
+    let before = first_chart(&s.doc).unwrap();
+    let r = run(
+        &mut s,
+        "chart.style",
+        json!({
+            "legendStyle": {"font": "Noto Sans", "size": 12, "color": "#FF0000", "bold": true},
+            "dataLabelsStyle": {"size": 10},
+            "dataLabelsOutline": true,
+            "catLabelPos": "rotate",
+            "catAxisColor": "aa0000",
+            "catTicks": true,
+            "valTicks": false,
+            "background": true,
+            "backgroundColor": "fafad2",
+            "lineWidth": 3,
+            "areaOpacity": 0.5,
+            "opacity": 0.75,
+            "smooth": true,
+            "markers": true
+        }),
+    );
+    // The chart JSON has every field, camelCase.
+    let j = &r["chart"];
+    assert_eq!(j["legendStyle"], json!({"font": "Noto Sans", "size": 12.0, "color": "ff0000", "bold": true}));
+    assert_eq!(j["dataLabelsStyle"], json!({"size": 10.0}));
+    for (k, v) in [
+        ("dataLabelsOutline", json!(true)),
+        ("catLabelPos", json!("rotate")),
+        ("catAxisColor", json!("aa0000")),
+        ("valAxisColor", json!(null)),
+        ("catTicks", json!(true)),
+        ("valTicks", json!(false)),
+        ("backgroundColor", json!("fafad2")),
+        ("lineWidth", json!(3.0)),
+        ("areaOpacity", json!(0.5)),
+        ("opacity", json!(0.75)),
+        ("smooth", json!(true)),
+        ("markers", json!(true)),
+    ] {
+        assert_eq!(j[k], v, "{k}");
+    }
+    let c = first_chart(&s.doc).unwrap();
+    assert_eq!((c.kind, c.title.as_deref(), &c.series), (ChartType::Area, Some("Sales"), &before.series), "the data stays");
+    // A text style merges; null clears one field, or the whole style.
+    run(&mut s, "chart.style", json!({"legendStyle": {"size": 14, "color": null}}));
+    let c2 = first_chart(&s.doc).unwrap();
+    assert_eq!(c2.legend_style, TextStyle { font: Some("Noto Sans".into()), size: Some(14.0), color: None, bold: Some(true) });
+    run(&mut s, "chart.style", json!({"legendStyle": null, "lineWidth": null, "catAxisColor": null}));
+    let c3 = first_chart(&s.doc).unwrap();
+    assert!(c3.legend_style.is_default() && c3.line_width.is_none() && c3.cat_axis_color.is_none());
+    assert_eq!(c3.cat_label_pos, CatLabelPos::Rotate, "a field left out stays");
+    // Saved and reopened as the same chart.
+    let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
+    assert_eq!(first_chart(&back), Some(c3.clone()));
+    // One undo step each.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(first_chart(&s.doc), Some(c2));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(first_chart(&s.doc), Some(c.clone()));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(first_chart(&s.doc), Some(before));
+    run(&mut s, "edit.redo", json!({}));
+    // Hostile numbers are held to what the chart takes; wrong types are errors that change nothing.
+    run(&mut s, "chart.style", json!({"titleStyle": {"size": 1e30}, "lineWidth": -5, "opacity": 7, "areaOpacity": -1}));
+    let h = first_chart(&s.doc).unwrap();
+    assert_eq!((h.title_style.size, h.line_width, h.opacity, h.area_opacity), (Some(96.0), Some(0.75), 1.0, 0.0));
+    let kept = first_chart(&s.doc).unwrap();
+    for bad in [
+        json!({}),
+        json!({"other": 1}),
+        json!({"legendStyle": 5}),
+        json!({"legendStyle": {"size": "big"}}),
+        json!({"legendStyle": {"color": "red"}}),
+        json!({"legendStyle": {"bold": 1}}),
+        json!({"legendStyle": {"font": 3}}),
+        json!({"catLabelPos": "diagonal"}),
+        json!({"catAxisColor": "12345"}),
+        json!({"catTicks": "yes"}),
+        json!({"lineWidth": "thick"}),
+        json!({"opacity": "half"}),
+        json!({"backgroundColor": 0}),
+    ] {
+        assert!(matches!(s.run("chart.style", &bad), Err(crate::CmdError::Params(_))), "{bad}");
+    }
+    assert_eq!(first_chart(&s.doc), Some(kept));
+    let mut plain = self::s();
+    assert!(matches!(plain.run("chart.style", &json!({"opacity": 0.5})), Err(crate::CmdError::Disabled(_))));
+}
+
+#[test]
+fn chart_reset_puts_the_look_back_as_insert_sets_it() {
+    use wordcraft_doc::chart::{ChartSpec, ChartType, Gridlines, LegendPos, LegendShape};
+    let look = json!({"colors": ["111111", "555555"], "gridlines": "dashed", "legend": "top", "roundedBars": true, "seriesGap": 12, "legendShape": "circle"});
+    let mut s = s();
+    let mut inserted = look.clone();
+    inserted["type"] = json!("column");
+    inserted["title"] = json!("Sales");
+    run(&mut s, "insert.chart", inserted);
+    let fresh = first_chart(&s.doc).unwrap();
+    run(&mut s, "chart.editData", json!({"data": {"categories": ["a", "b"], "series": [{"name": "x", "values": [1, 2]}]}}));
+    run(&mut s, "chart.style", json!({"legendStyle": {"size": 20}, "opacity": 0.3, "catTicks": true, "lineWidth": 5}));
+    run(&mut s, "chart.elements", json!({"valAxis": false, "background": true}));
+    run(&mut s, "chart.axis", json!({"max": 10}));
+    run(&mut s, "chart.colors", json!({"colors": ["abcdef"]}));
+    let styled = first_chart(&s.doc).unwrap();
+    let r = run(&mut s, "chart.reset", look.clone());
+    let c = first_chart(&s.doc).unwrap();
+    // The data, type and title stay; the look is a new chart's with those params.
+    let want = ChartSpec { categories: styled.categories.clone(), series: styled.series.clone(), ..fresh.clone() };
+    assert_eq!(c, want);
+    assert_eq!(
+        (c.legend, c.legend_shape, c.gridlines, c.rounded_bars, c.series_gap),
+        (Some(LegendPos::Top), LegendShape::Circle, Gridlines::Dashed, true, 12.0)
+    );
+    assert_eq!(r["chart"]["opacity"], json!(1.0));
+    // One undo step.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(first_chart(&s.doc), Some(styled));
+    // With no params: a new chart's look (the theme's colours, legend at the bottom).
+    run(&mut s, "chart.reset", json!({}));
+    let bare = first_chart(&s.doc).unwrap();
+    let sample = ChartSpec::sample(ChartType::Column);
+    assert_eq!((bare.legend, bare.colors.len(), bare.title.as_deref()), (sample.legend, 0, Some("Sales")));
+    // chart.style's fields go with it too, in the same step.
+    run(&mut s, "chart.reset", json!({"opacity": 0.5, "legend": "none"}));
+    let both = first_chart(&s.doc).unwrap();
+    assert_eq!((both.opacity, both.legend), (0.5, None));
+    for bad in [json!({"legend": "middle"}), json!({"gridlines": 2}), json!({"opacity": "x"}), json!({"axisMin": 3, "axisMax": 1})] {
+        assert!(matches!(s.run("chart.reset", &bad), Err(crate::CmdError::Params(_))), "{bad}");
+    }
+}
+
+#[test]
+fn object_position_places_a_floating_chart_and_the_frame_says_where() {
+    use crate::cmd::chart::selected_chart_frame;
+    use wordcraft_doc::para::{InlineObject, Wrap};
+    let mut s = s();
+    run(&mut s, "text.insert", json!({"text": "Text around the chart. "}));
+    run(&mut s, "insert.chart", json!({"type": "column"}));
+    let at = s.sel.anchor.clone();
+    let inline = selected_chart_frame(&mut s).unwrap();
+    assert_eq!(inline["floating"], json!(false));
+    assert!(inline.get("x").is_none());
+    // In Line with Text: not placed by x and y.
+    assert!(matches!(s.run("object.position", &json!({"x": 100, "y": 200})), Err(crate::CmdError::Disabled(_))));
+    // Floating (as one read from a file can be): placed, with its size and wrapping kept.
+    let para = s.doc.para_mut(at.story, &at.path).unwrap();
+    if let Some(InlineObject::Graphic { float, .. }) = para.object_at_mut(at.off) {
+        float.wrap = Wrap::Square;
+    }
+    para.touch();
+    s.touch();
+    let r = run(&mut s, "object.position", json!({"x": 150, "y": 300}));
+    assert_eq!(r["page"], json!(0));
+    let f = selected_chart_frame(&mut s).unwrap();
+    assert_eq!(f["floating"], json!(true));
+    let (x, y) = (f["x"].as_f64().unwrap(), f["y"].as_f64().unwrap());
+    assert!((x - 150.0).abs() < 0.5 && (y - 300.0).abs() < 0.5, "{f}");
+    assert!(first_chart(&s.doc).is_some(), "still the editable chart");
+    // One undo step back to where it was.
+    run(&mut s, "edit.undo", json!({}));
+    let back = selected_chart_frame(&mut s);
+    assert!(back.as_ref().is_none_or(|b| b["x"].as_f64() != Some(x) || b["y"].as_f64() != Some(y)), "{back:?}");
+    // Hostile params: errors or held to the page, never a panic.
+    run(&mut s, "edit.redo", json!({}));
+    for bad in [json!({}), json!({"x": 1}), json!({"x": "a", "y": 2}), json!({"x": f64::MAX, "y": -1e300}), json!({"x": 10, "y": 10, "page": 1e9})] {
+        let _ = s.run("object.position", &bad);
+        let _ = s.layout();
+    }
+    assert!(matches!(s.run("object.position", &json!({"y": 2})), Err(crate::CmdError::Params(_))));
+}
+
+#[test]
+fn hostile_params_never_panic_on_a_selected_chart() {
+    let junk = [
+        json!(null),
+        json!({}),
+        json!({"legendStyle": {"font": "\u{0}".repeat(10_000), "size": -1e308, "color": "#fff", "bold": null}, "opacity": 1e308, "lineWidth": 1e-300}),
+        json!({"titleStyle": [], "catLabelPos": 5, "areaOpacity": "NaN", "valTicks": [true]}),
+        json!({"x": 1e30, "y": -1e30, "page": u64::MAX, "colors": vec!["000000"; 100], "seriesGap": 1e300}),
+        json!({"legend": 7, "gridlines": "dotted", "axisMin": 1e308, "axisMax": -1e308, "axisStep": 0}),
+    ];
+    for id in ["chart.style", "chart.reset", "object.position", "object.lock"] {
+        for kind in ["column", "area", "pie", "scatter"] {
+            for j in &junk {
+                let mut s = s();
+                run(&mut s, "insert.chart", json!({"type": kind}));
+                let _ = s.run(id, j);
+                s.clamp_selection();
+                let _ = s.layout();
+            }
+        }
+    }
+}
+
+#[test]
+fn a_locked_chart_refuses_moving_and_resizing_but_keeps_its_edits() {
+    use crate::cmd::chart::selected_chart_frame;
+    use wordcraft_doc::para::{InlineObject, Wrap};
+    let mut s = s();
+    run(&mut s, "text.insert", json!({"text": "Text. "}));
+    run(&mut s, "insert.chart", json!({"type": "column"}));
+    let at = s.sel.anchor.clone();
+    // Floating, so object.position applies when unlocked.
+    let para = s.doc.para_mut(at.story, &at.path).unwrap();
+    if let Some(InlineObject::Graphic { float, .. }) = para.object_at_mut(at.off) {
+        float.wrap = Wrap::Square;
+    }
+    para.touch();
+    s.touch();
+    assert_eq!(selected_chart_frame(&mut s).unwrap()["locked"], json!(false));
+    run(&mut s, "object.lock", json!({"locked": true}));
+    assert_eq!(selected_chart_frame(&mut s).unwrap()["locked"], json!(true));
+    let locked_msg = |r: Result<serde_json::Value, crate::CmdError>| matches!(r, Err(crate::CmdError::Disabled(m)) if m.contains("locked"));
+    for (id, v) in [
+        ("picture.size", json!({"width": 200})),
+        ("object.position", json!({"x": 100, "y": 200})),
+        ("arrange.bounds", json!({"width": 200})),
+        ("arrange.nudge", json!({"dx": 5})),
+    ] {
+        let r = s.run(id, &v);
+        assert!(id.starts_with("arrange.") || locked_msg(r.clone()), "{id}: {r:?}");
+        assert!(r.is_err(), "{id} refused");
+    }
+    // Content and look edits still work.
+    run(&mut s, "chart.style", json!({"opacity": 0.5}));
+    assert_eq!(first_chart(&s.doc).unwrap().opacity, 0.5);
+    // Saved and reopened locked (standard DrawingML frame locks).
+    let bytes = wordcraft_docx::write(&s.doc).unwrap();
+    let back = wordcraft_docx::read(&bytes).unwrap();
+    let p = back.para_at(&Pos::body(0, 0)).unwrap();
+    let float_locked = p.object_offsets().into_iter().find_map(|o| p.object_at(o).and_then(|o| o.frame()).map(|(_, _, f)| f.locked));
+    assert_eq!(float_locked, Some(true));
+    // Unlocking (one undo step either way) restores moving and resizing.
+    run(&mut s, "object.lock", json!({"locked": false}));
+    run(&mut s, "picture.size", json!({"width": 200}));
+    run(&mut s, "object.position", json!({"x": 100, "y": 200}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(selected_chart_frame(&mut s).unwrap()["locked"], json!(true));
+    for bad in [json!({}), json!({"locked": "yes"}), json!({"locked": 1})] {
+        assert!(matches!(s.run("object.lock", &bad), Err(crate::CmdError::Params(_))), "{bad}");
+    }
+    assert!(matches!(self::s().run("object.lock", &json!({"locked": true})), Err(crate::CmdError::Disabled(_))));
+}
+
+#[test]
+fn shape_locks_round_trip_as_drawingml_locks() {
+    let mut s = s();
+    run(&mut s, "insert.shape", json!({"kind": "ellipse"}));
+    run(&mut s, "object.lock", json!({"locked": true}));
+    assert!(matches!(s.run("arrange.bounds", &json!({"width": 50})), Err(crate::CmdError::Disabled(_))));
+    let bytes = wordcraft_docx::write(&s.doc).unwrap();
+    let back = wordcraft_docx::read(&bytes).unwrap();
+    let locked = |d: &wordcraft_doc::Document| {
+        let p = d.para_at(&Pos::body(0, 0)).unwrap();
+        p.object_offsets().into_iter().find_map(|o| p.object_at(o).and_then(|o| o.frame()).map(|(_, _, f)| f.locked))
+    };
+    assert_eq!(locked(&back), Some(true));
+    // Unlocked: written without locks, read back unlocked.
+    run(&mut s, "object.lock", json!({"locked": false}));
+    let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
+    assert_eq!(locked(&back), Some(false));
+}
+
+#[test]
+fn every_chart_type_inserts_edits_and_saves() {
+    use wordcraft_doc::chart::{ChartType, SeriesKind};
+    for kind in ChartType::ALL {
+        let mut s = s();
+        let r = run(&mut s, "insert.chart", json!({"type": kind.id(), "title": "T", "dataLabels": true}));
+        assert_eq!(r["chart"]["type"], json!(kind.id()), "the type string in the chart JSON");
+        let c = first_chart(&s.doc).unwrap();
+        let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
+        assert_eq!(first_chart(&back), Some(c), "{kind:?} saved and reopened");
+        let g = graphic_items(&s);
+        assert!(g > 3, "{kind:?} draws ({g} items)");
+        let _ = s.layout();
+    }
+    // Bubble data: a size per point, in its own field; a type change gives equal bubbles.
+    let mut s = s();
+    run(&mut s, "insert.chart", json!({"type": "column"}));
+    run(&mut s, "chart.type", json!({"type": "bubble"}));
+    assert!(first_chart(&s.doc).unwrap().series.iter().all(|x| x.sizes.iter().all(|v| *v == Some(1.0))));
+    run(
+        &mut s,
+        "chart.editData",
+        json!({"data": {"categories": [1, 2, 3], "series": [{"name": "A", "values": [3, 1, 2], "sizes": [10, null, "4"]}]}}),
+    );
+    let c = first_chart(&s.doc).unwrap();
+    assert_eq!(c.series[0].sizes, [Some(10.0), None, Some(4.0)]);
+    // Combo data: each series' kind and axis.
+    run(&mut s, "chart.type", json!({"type": "combo"}));
+    run(
+        &mut s,
+        "chart.editData",
+        json!({"data": {"categories": ["a", "b"], "series": [{"name": "Cols", "values": [1, 2]}, {"name": "Rate", "values": [10, 20], "kind": "line", "secondary": true}, {"name": "Area", "values": [1, 1], "kind": "area"}]}}),
+    );
+    let c = first_chart(&s.doc).unwrap();
+    assert_eq!(
+        c.series.iter().map(|x| (x.kind, x.secondary)).collect::<Vec<_>>(),
+        [(None, false), (Some(SeriesKind::Line), true), (Some(SeriesKind::Area), false)]
+    );
+    let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
+    assert_eq!(first_chart(&back), Some(c));
+    // Another type drops what only combo or bubble charts have.
+    run(&mut s, "chart.type", json!({"type": "line"}));
+    assert!(first_chart(&s.doc).unwrap().series.iter().all(|x| x.kind.is_none() && !x.secondary && x.sizes.is_empty()));
+    // Waterfall total and pie-of-pie split: chart.style and insert.chart.
+    run(&mut s, "chart.type", json!({"type": "waterfall"}));
+    run(&mut s, "chart.style", json!({"waterfallTotal": true}));
+    assert!(first_chart(&s.doc).unwrap().waterfall_total);
+    run(&mut s, "insert.chart", json!({"type": "pieOfPie", "splitPos": 3}));
+    assert_eq!(first_chart(&s.doc).unwrap().split_pos, 3);
+    run(&mut s, "chart.style", json!({"splitPos": 99}));
+    assert_eq!(first_chart(&s.doc).unwrap().split_pos, 5, "held to one less than the points");
+    for bad in [
+        json!({"data": {"series": [{"values": [1], "kind": "pie"}]}}),
+        json!({"data": {"series": [{"values": [1], "sizes": 5}]}}),
+        json!({"data": {"series": [{"values": [1], "secondary": "yes"}]}}),
+    ] {
+        assert!(matches!(s.run("chart.editData", &bad), Err(crate::CmdError::Params(_))), "{bad}");
+    }
+    assert!(matches!(s.run("chart.style", &json!({"splitPos": "two"})), Err(crate::CmdError::Params(_))));
+}
+
+/// How many items the selected chart is drawn with.
+fn graphic_items(s: &Session) -> usize {
+    let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+    p.object_offsets()
+        .into_iter()
+        .find_map(|o| match p.object_at(o) {
+            Some(wordcraft_doc::para::InlineObject::Graphic { graphic, .. }) => Some(graphic.items.len()),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
+#[test]
+fn hostile_data_never_panics_for_any_chart_type() {
+    use wordcraft_doc::chart::ChartType;
+    let junk = [
+        json!({"data": {"categories": ["x", 1e308, null], "series": [{"values": [-1e308, "NaN", 1e308], "sizes": [-5, 0, 1e308], "kind": "area", "secondary": true}]}}),
+        json!({"data": {"categories": [], "series": [{"values": []}]}}),
+        json!({"data": {"categories": ["a"], "series": [{"values": [0], "sizes": [0]}, {"values": [-3]}]}}),
+    ];
+    for kind in ChartType::ALL {
+        for j in &junk {
+            let mut s = s();
+            run(&mut s, "insert.chart", json!({"type": kind.id()}));
+            let _ = s.run("chart.editData", j);
+            let _ = s.run("chart.style", &json!({"splitPos": -7, "waterfallTotal": true}));
+            let _ = s.layout();
+            let _ = wordcraft_docx::write(&s.doc).map(|b| wordcraft_docx::read(&b));
+        }
+    }
+}
+
+#[test]
+fn radar_gradient_is_a_style_setting() {
+    let mut s = s();
+    let r = run(&mut s, "insert.chart", json!({"type": "radarMarkers", "radarGradient": true}));
+    assert_eq!((r["chart"]["radarGradient"].as_bool(), r["chart"]["lineWidth"].as_f64()), (Some(true), Some(0.75)));
+    run(&mut s, "chart.style", json!({"radarGradient": false}));
+    assert!(!first_chart(&s.doc).unwrap().radar_gradient);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(first_chart(&s.doc).unwrap().radar_gradient);
+    run(&mut s, "chart.reset", json!({"radarGradient": true}));
+    let c = first_chart(&s.doc).unwrap();
+    assert!(c.radar_gradient && c.kind == wordcraft_doc::chart::ChartType::RadarMarkers);
+    let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
+    assert_eq!(first_chart(&back), Some(c));
+    assert!(matches!(s.run("chart.style", &json!({"radarGradient": "yes"})), Err(crate::CmdError::Params(_))));
 }

@@ -125,6 +125,8 @@ impl Session {
             others: _,
             order: _,
             untitled_count: _,
+            // A chart preview is never an edit.
+            chart_preview: _,
             ime_body_epoch,
             // The IME revision and its caret token are process-global evidence, not document
             // state: a rollback must not reuse a revision.

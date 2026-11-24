@@ -179,7 +179,12 @@ impl Writer<'_> {
         let InlineObject::Graphic { w: gw, h: gh, alt, float, graphic } = o else { return };
         let ink = graphic.kind == wordcraft_doc::graphic::GraphicKind::Ink;
         let root = match (graphic.chart.as_deref(), graphic.smart_art.as_deref(), graphic.source.as_deref()) {
-            (Some(spec), _, _) => crate::xml::parse(self.chart_graphic(spec, rels).as_bytes()).ok(),
+            // A chart as it was read (not edited since, which drops its source): its own parts,
+            // whoever wrote them, so nothing the model leaves out is lost.
+            (Some(spec), _, Some(src)) => {
+                self.embedded_tree(src, rels, None).or_else(|| crate::xml::parse(self.chart_graphic(spec, rels).as_bytes()).ok())
+            }
+            (Some(spec), _, None) => crate::xml::parse(self.chart_graphic(spec, rels).as_bytes()).ok(),
             (None, Some(spec), _) => crate::xml::parse(self.smart_art_graphic(spec, *gw, *gh, rels).as_bytes()).ok(),
             // Ink in a group member's form (no drawing of its own) can't stand alone: left
             // out before its parts are queued, so no orphan part or relationship is written.
@@ -222,6 +227,10 @@ impl Writer<'_> {
                 wordcraft_doc::graphic::GraphicKind::Diagram => format!("Diagram {docpr}"),
                 wordcraft_doc::graphic::GraphicKind::Ink => format!("Ink {docpr}"),
             };
+            // A chart's WordCraft-only settings, by its drawing's name, for the records part.
+            if let Some(r) = graphic.chart.as_deref().and_then(|spec| crate::chart_meta::record_for(&name, spec)) {
+                self.chart_records.push(r);
+            }
             let z = self.z;
             self.graphic_frame(w, DrawingInfo { float, size: (*gw, *gh), docpr: &docpr, name: &name, alt }, native.unwrap_or(&root));
             if let Some(fallback) = fallback {
@@ -265,7 +274,7 @@ impl Writer<'_> {
         let docpr = self.next_docpr();
         let name = format!("Picture {docpr}");
         self.drawing_open(w, DrawingInfo { float, size: (*iw, *ih), docpr: &docpr, name: &name, alt });
-        w.empty("wp:cNvGraphicFramePr", &[]);
+        super::drawing::frame_pr(w, float);
         w.open("a:graphic", &[]);
         w.open("a:graphicData", &[("uri", "http://schemas.openxmlformats.org/drawingml/2006/picture")]);
         self.pic(w, o, &file, (0.0, 0.0), rels);
@@ -299,7 +308,7 @@ impl Writer<'_> {
         }
         let float = &float;
         self.drawing_open(w, DrawingInfo { float, size: (*sw, *sh), docpr: &docpr, name: &name, alt: o.alt_text() });
-        w.empty("wp:cNvGraphicFramePr", &[]);
+        super::drawing::frame_pr(w, float);
         w.open("a:graphic", &[]);
         w.open("a:graphicData", &[("uri", "http://schemas.microsoft.com/office/word/2010/wordprocessingShape")]);
         self.wsp(w, o, None, (0.0, 0.0), rels, depth);
@@ -320,7 +329,7 @@ impl Writer<'_> {
         let docpr = self.next_docpr();
         let name = format!("{} {docpr}", if canvas.is_some() { "Canvas" } else { "Group" });
         self.drawing_open(w, DrawingInfo { float, size: (*gw, *gh), docpr: &docpr, name: &name, alt: o.alt_text() });
-        w.empty("wp:cNvGraphicFramePr", &[]);
+        super::drawing::frame_pr(w, float);
         w.open("a:graphic", &[]);
         let outer = match canvas {
             Some(c) => {

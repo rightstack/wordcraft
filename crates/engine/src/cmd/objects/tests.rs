@@ -1274,3 +1274,51 @@ fn only_ink_members_pin_a_group() {
     }
     assert!(!holds_ink(&group), "a group of charts is not pinned");
 }
+
+#[test]
+fn a_locked_picture_refuses_every_size_position_and_layout_change_until_unlocked() {
+    let mut s = Session::new(wordcraft_doc::Document::new());
+    s.run("text.insert", &json!({"text": "Some text "})).unwrap();
+    let data = super::super::insert::base64_encode(&png(20, 10));
+    s.run("insert.picture", &json!({"data": data})).unwrap();
+    // Floating, so the floating-only commands apply.
+    s.run("arrange.wrap", &json!({"wrap": "square"})).unwrap();
+    s.run("object.lock", &json!({"locked": true})).unwrap();
+    let blocked = [
+        ("picture.size", json!({"width": 40})),
+        ("picture.crop", json!({"left": 0.1})),
+        ("picture.crop", json!({"left": 0.1, "width": 30, "height": 12})),
+        ("arrange.rotate", json!({"direction": "right"})),
+        ("arrange.rotation", json!({"degrees": 30})),
+        ("arrange.wrap", json!({"wrap": "tight"})),
+        ("arrange.wrapText", json!({"side": "left"})),
+        ("arrange.moveWithText", json!({"value": false})),
+        ("arrange.bringForward", json!({})),
+        ("arrange.sendBackward", json!({})),
+        ("arrange.bringToFront", json!({})),
+        ("arrange.sendToBack", json!({})),
+        ("arrange.position", json!({"preset": "topRight"})),
+        ("arrange.align", json!({"value": "right"})),
+        ("arrange.bounds", json!({"width": 50})),
+        ("arrange.nudge", json!({"dx": 5})),
+        ("object.position", json!({"x": 100, "y": 200})),
+    ];
+    let before = s.doc.clone();
+    for (id, v) in &blocked {
+        match s.run(id, v) {
+            Err(CmdError::Disabled(m)) => assert!(m.contains(super::select::LOCKED), "{id}: {m}"),
+            other => panic!("{id} while locked: {other:?}"),
+        }
+    }
+    assert_eq!(s.doc.para_at(&Pos::body(0, 0)).map(|p| p.text.clone()), before.para_at(&Pos::body(0, 0)).map(|p| p.text.clone()));
+    assert!(selected(&s).is_some_and(|(_, o)| o.frame().is_some_and(|(w, _, f)| f.locked && f.rot == 0.0 && w == obj_size(&o).0)));
+    // Look and description edits still work.
+    s.run("picture.altText", &json!({"text": "A red box"})).unwrap();
+    s.run("picture.color", &json!({"saturation": 0})).unwrap();
+    // Unlocked: every one of them works again.
+    s.run("object.lock", &json!({"locked": false})).unwrap();
+    for (id, v) in &blocked {
+        s.run(id, v).unwrap_or_else(|e| panic!("{id} after unlock: {e}"));
+    }
+    let _ = s.layout();
+}

@@ -1,9 +1,10 @@
-use super::arrange::{MAX_OFFSET, bounds, copy_to, move_with_text, unalign};
+use super::arrange::{MAX_OFFSET, bounds, copy_to, move_with_text, position, unalign};
 use super::group::{add_object, group, ungroup};
 use super::picture::{adjust, adjust_media, crop, recolor, relook, remove_background, reset, size};
 use super::select::{
-    all_objects, alt_text, can_group, edit_obj, has_floating, has_group, has_movable, has_object, has_picture, has_shape, has_shape_or_canvas,
-    has_sizable, obj_size, objects_list, selected, with_float, with_obj,
+    all_objects, alt_text, can_group, edit_obj, has_floating_free, has_floating_object, has_group, has_movable, has_movable_free, has_object,
+    has_one_object, has_picture, has_picture_free, has_shape, has_shape_or_canvas, has_sizable_free, obj_size, objects_list, selected, with_float,
+    with_obj,
 };
 use super::shape::{NO_TEXT_BOX, can_link, has_text_box, link_text_box, set_text_body, shape_effects, text_box_target};
 use super::{CmdError, CommandSpec, InlineObject, Pos, Rgb, Selection, Spin, TextVert, VAlign, Wrap, WrapText, json, p, sel_result};
@@ -14,12 +15,12 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(
                 r#"{"width"?: pt, "height"?: pt, "lockAspect"?: bool, "scale"?: percent, "original"?: bool} (scale: of the current size, or with original of the picture's original size, its pixels at 96 ppi less what is cropped; original alone restores that size; one side alone keeps the proportions unless lockAspect is false; 1–4000 pt: when the proportions are kept, a side past 4000 pt shrinks the other with it)"#,
             )
-            .when(has_sizable),
+            .when(has_sizable_free),
         CommandSpec::new("picture.crop", "Crop", "Picture Format › Size", crop)
             .params(
                 r#"{"left"?, "top"?, "right"?, "bottom"? (fractions of the source 0–0.95; the two sides of an axis keep at least 5% between them; a side left out is uncropped), "width"?: pt, "height"?: pt (the new display size, in the same undo step; a floating picture also moves by what a left/top crop trims, so the visible part stays put)}"#,
             )
-            .when(has_picture),
+            .when(has_picture_free),
         // Kept for scripts written before every object had alt text: `object.altText` on a picture.
         CommandSpec::new("picture.altText", "Alt Text", "Picture Format › Accessibility", |s, v| {
             p::req_str(v, "text")?;
@@ -176,7 +177,7 @@ pub fn specs() -> Vec<CommandSpec> {
             with_float(s, |f| f.set_spin(f.spin().within(by)))
         })
         .params(r#"{"direction": "right|left|flipVertical|flipHorizontal"}  (turns 90° or mirrors the selected picture, shape or text box; its pixels are kept)"#)
-        .when(has_movable),
+        .when(has_movable_free),
         CommandSpec::new("arrange.rotation", "Rotation", "Layout › Arrange", |s, v| {
             let deg = p::req_f32(v, "degrees")?;
             let (fh, fv) = (p::bool(v, "flipH"), p::bool(v, "flipV"));
@@ -186,23 +187,23 @@ pub fn specs() -> Vec<CommandSpec> {
             })
         })
         .params(r#"{"degrees": number, "flipH"?: bool, "flipV"?: bool}  (the exact angle, clockwise, of the selected picture, shape or text box; normalised to 0–360)"#)
-        .when(has_movable),
+        .when(has_movable_free),
         CommandSpec::new("arrange.wrap", "Wrap Text", "Layout › Arrange", |s, v| {
             let wrap: Wrap = serde_json::from_value(v.get("wrap").cloned().unwrap_or(json!("square"))).map_err(|e| CmdError::Params(e.to_string()))?;
             with_float(s, |f| f.wrap = wrap)
         })
         .params(r#"{"wrap": "inline|square|tight|through|topAndBottom|behindText|inFrontOfText"}"#)
-        .when(has_movable),
+        .when(has_movable_free),
         CommandSpec::new("arrange.wrapText", "Wrap Text Sides", "Layout › Arrange", |s, v| {
             let side = p::str(v, "side").unwrap_or("bothSides");
             let side = WrapText::from_ooxml(side).ok_or_else(|| CmdError::Params(format!("unknown side {side:?}")))?;
             with_float(s, |f| f.wrap_text = side)
         })
         .params(r#"{"side": "bothSides|left|right|largest"}  (the sides of the selected Square, Tight or Through object text flows on; largest: the wider side, line by line)"#)
-        .when(has_movable),
+        .when(has_movable_free),
         CommandSpec::new("arrange.moveWithText", "Move with Text", "Layout › Arrange › Wrap Text", |s, v| move_with_text(s, p::bool(v, "value").unwrap_or(true)))
             .params(r#"{"value": bool}  (true: Move with Text, the floating object's vertical position follows its paragraph; false: Fix Position on Page. It stays where it is)"#)
-            .when(has_floating),
+            .when(has_floating_free),
         CommandSpec::new("arrange.position", "Position", "Layout › Arrange", |s, v| {
             let preset = p::str(v, "preset").unwrap_or("middleCenter").to_string();
             let (x, y) = (p::f32(v, "x"), p::f32(v, "y"));
@@ -223,12 +224,12 @@ pub fn specs() -> Vec<CommandSpec> {
             })
         })
         .params(r#"{"preset"?: "topLeft|topCenter|topRight|middleLeft|middleCenter|middleRight|bottomLeft|bottomCenter|bottomRight", "x"?: pt, "y"?: pt}"#)
-        .when(has_movable),
-        CommandSpec::new("arrange.bringForward", "Bring Forward", "Layout › Arrange", |s, _| with_float(s, |f| f.wrap = Wrap::InFrontOfText)).when(has_movable),
-        CommandSpec::new("arrange.sendBackward", "Send Backward", "Layout › Arrange", |s, _| with_float(s, |f| f.wrap = Wrap::BehindText)).when(has_movable),
+        .when(has_movable_free),
+        CommandSpec::new("arrange.bringForward", "Bring Forward", "Layout › Arrange", |s, _| with_float(s, |f| f.wrap = Wrap::InFrontOfText)).when(has_movable_free),
+        CommandSpec::new("arrange.sendBackward", "Send Backward", "Layout › Arrange", |s, _| with_float(s, |f| f.wrap = Wrap::BehindText)).when(has_movable_free),
         // [lily] Bring to Front / Send to Back: the stacking order (`relativeHeight`) among floating objects.
-        CommandSpec::new("arrange.bringToFront", "Bring to Front", "Layout › Arrange", |s, _| restack(s, true)).when(has_movable),
-        CommandSpec::new("arrange.sendToBack", "Send to Back", "Layout › Arrange", |s, _| restack(s, false)).when(has_movable),
+        CommandSpec::new("arrange.bringToFront", "Bring to Front", "Layout › Arrange", |s, _| restack(s, true)).when(has_movable_free),
+        CommandSpec::new("arrange.sendToBack", "Send to Back", "Layout › Arrange", |s, _| restack(s, false)).when(has_movable_free),
         CommandSpec::new("arrange.align", "Align", "Layout › Arrange", |s, v| {
             let h = p::str(v, "value").unwrap_or("center").to_string();
             let tw = crate::cmd::page::sect(s).text_width();
@@ -247,11 +248,23 @@ pub fn specs() -> Vec<CommandSpec> {
             })
         })
         .params(r#"{"value": "left|center|right"}"#)
-        .when(has_movable),
+        .when(has_movable_free),
         CommandSpec::new("arrange.selectionPane", "Selection Pane", "Layout › Arrange", objects_list).pure(),
         CommandSpec::new("arrange.bounds", "Move or Resize", "Layout › Arrange", bounds)
             .params(r#"{"width"?: pt, "height"?: pt, "x"?: pt, "y"?: pt, "page"?: n, "to"?: Pos}  (x/y: the top-left on page `page` (0-based, default its page); moving an inline object by x/y floats it. to: an In Line with Text object moves to that text position and stays inline, as a drag does)"#)
-            .when(has_movable),
+            .when(has_movable_free),
+        CommandSpec::new("object.position", "Position", "Layout › Arrange", position)
+            .params(r#"{"x": pt, "y": pt, "page"?: n}  (a floating object, a chart or diagram too: its top-left to x, y from the top-left of page `page` (0-based, default its page); size and wrapping stay. In Line with Text objects aren't placed this way)"#)
+            .when(has_floating_object),
+        CommandSpec::new("object.lock", "Lock", "Layout › Arrange", |s, v| {
+            let locked = match v.get("locked") {
+                Some(serde_json::Value::Bool(b)) => *b,
+                _ => return Err(CmdError::Params("`locked` is required: true or false".into())),
+            };
+            with_float(s, move |f| f.locked = locked)
+        })
+        .params(r#"{"locked": bool}  (the selected object locked in place: it can't be moved, resized, turned, cropped, restacked or rewrapped, though its content and look can still be edited; saved as DrawingML noMove/noResize locks)"#)
+        .when(has_one_object),
         CommandSpec::new("arrange.copyTo", "Copy to", "Layout › Arrange", copy_to)
             .params(r#"{"x": pt, "y": pt, "page"?: n} | {"to": Pos}  (Ctrl+drag: a copy of the selected object lands with its top-left there, or an In Line with Text one at the text position `to`, and is selected; the original and the clipboard stay as they were)"#)
             .when(has_movable),
@@ -265,7 +278,7 @@ pub fn specs() -> Vec<CommandSpec> {
             })
         })
         .params(r#"{"dx"?: pt, "dy"?: pt}"#)
-        .when(has_floating),
+        .when(has_floating_free),
         CommandSpec::new("arrange.group", "Group", "Layout › Arrange", group)
             .params(r#"{}  (groups the selected pictures, shapes and text boxes: the selected one plus those added with select.addObject)"#)
             .when(can_group),

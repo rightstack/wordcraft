@@ -969,6 +969,7 @@ fn inline_chart_is_a_figure_with_its_text_inside_it() {
         bold: false,
         align: TextAlign::Center,
         font: None,
+        rotation: 0.0,
     }];
     let graphic = Graphic { kind: GraphicKind::Chart, items, ..Default::default() };
     let obj = InlineObject::Graphic { w: 216.0, h: 144.0, alt: "Sales by quarter".into(), float: Default::default(), graphic: Arc::new(graphic) };
@@ -983,7 +984,7 @@ fn inline_chart_is_a_figure_with_its_text_inside_it() {
 fn chart_without_alt_text_is_a_figure_called_chart() {
     use wordcraft_doc::graphic::{Graphic, GraphicItem, GraphicKind, PathSeg};
     let segs = vec![PathSeg::Move(1.0, 1.0), PathSeg::Line(50.0, 50.0)];
-    let items = vec![GraphicItem::Path { segs, fill: None, stroke: Some(wordcraft_doc::props::Rgb::BLACK), stroke_width: 1.0 }];
+    let items = vec![GraphicItem::Path { segs, fill: None, stroke: Some(wordcraft_doc::props::Rgb::BLACK), stroke_width: 1.0, gradient: None }];
     let graphic = Graphic { kind: GraphicKind::Chart, items, ..Default::default() };
     let obj = InlineObject::Graphic { w: 216.0, h: 144.0, alt: String::new(), float: Default::default(), graphic: Arc::new(graphic) };
     let mut d = Document::from_text("Chart");

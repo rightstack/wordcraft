@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod bibliography;
+mod chart_meta;
 mod chart_spec;
 mod crypt;
 mod custom;
@@ -25,7 +26,7 @@ mod write;
 mod xml;
 
 pub use bibliography::{MAX_SOURCES, Sources, read_sources};
-pub use chart_spec::{chart_items, chart_xml};
+pub use chart_spec::{chart_items, chart_plot_rect, chart_xml};
 pub use crypt::{
     DEFAULT_SPIN_COUNT, MAX_PASSWORD_CHARS, PasswordCheck, check_password, check_protection_password, decrypt, encrypt, encrypt_standard_for_tests,
     encrypt_with_spin_count, is_encrypted, protection_hash,

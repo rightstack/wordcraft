@@ -458,8 +458,23 @@ impl super::Writer<'_> {
             self.embeds.chart_cut = true;
             log::warn!("docx: a chart has more series or points than a chart part holds; the rest are left out of the file");
         }
-        let bytes = xml.into_bytes();
-        self.embeds.parts.push((name.clone(), bytes, crate::chart_spec::CHART_CT.to_string(), PartRels::default()));
+        // The workbook the chart's data names (written again from the model on every save), as the
+        // chart part's first relationship, the id its `c:externalData` names.
+        let mut chart_rels = PartRels::default();
+        let xml = match crate::chart_spec::chart_workbook(spec) {
+            Ok(book) => {
+                let book_name = self.embeds.fresh("word/embeddings/Workbook", ".xlsx");
+                chart_rels.add(crate::chart_spec::PACKAGE_REL, &relative(&name, &book_name), false);
+                self.embeds.parts.push((book_name, book, crate::chart_spec::XLSX_CT.to_string(), PartRels::default()));
+                xml
+            }
+            Err(e) => {
+                // No workbook: no reference to one (the caches still hold the data).
+                log::warn!("docx: a chart's workbook couldn't be written ({e}); its data stays in the chart part");
+                crate::chart_spec::without_workbook(&xml)
+            }
+        };
+        self.embeds.parts.push((name.clone(), xml.into_bytes(), crate::chart_spec::CHART_CT.to_string(), chart_rels));
         let id = rels.add(crate::package::rt::CHART, &relative(STORY_PART, &name), false);
         let mut w = xml::W::default();
         w.open("a:graphic", &[("xmlns:a", "http://schemas.openxmlformats.org/drawingml/2006/main")]);
@@ -863,10 +878,11 @@ mod tests {
             let spec = ChartSpec {
                 kind: ChartType::Column,
                 categories: vec!["a".into(), "b".into()],
-                series: (0..series).map(|i| ChartSeries { name: format!("S{i}"), values: vec![Some(1.0); 2] }).collect(),
+                series: (0..series).map(|i| ChartSeries { name: format!("S{i}"), values: vec![Some(1.0); 2], ..Default::default() }).collect(),
                 title: None,
                 legend: None,
                 data_labels: false,
+                ..Default::default()
             };
             let graphic = Graphic { kind: GraphicKind::Chart, w: 100.0, h: 100.0, chart: Some(Arc::new(spec)), ..Default::default() };
             InlineObject::Graphic { w: 100.0, h: 100.0, alt: String::new(), float: Default::default(), graphic: Arc::new(graphic) }

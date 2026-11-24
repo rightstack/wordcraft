@@ -19,6 +19,55 @@ pub(super) fn has_floating(s: &Session) -> Option<&'static str> {
     }
 }
 
+/// Why a locked object refuses moving, resizing, turning, cropping, restacking and rewrapping.
+pub(super) const LOCKED: &str = "this object is locked: unlock it to change its size, position or layout";
+
+/// [`has_picture`] for commands that change a picture's frame (crop): a locked one refuses them.
+pub(super) fn has_picture_free(s: &Session) -> Option<&'static str> {
+    has_picture(s).or_else(|| selected_locked(s).then_some(LOCKED))
+}
+
+/// Whether the selected object is locked in place ([`Float::locked`]).
+fn selected_locked(s: &Session) -> bool {
+    selected(s).is_some_and(|(_, o)| o.frame().is_some_and(|(_, _, f)| f.locked))
+}
+
+/// [`has_movable`] for commands that change an object's size, place, turn, stacking or wrapping: a locked object refuses them.
+pub(super) fn has_movable_free(s: &Session) -> Option<&'static str> {
+    has_movable(s).or_else(|| selected_locked(s).then_some(LOCKED))
+}
+
+/// [`has_floating`] for commands that move or rewrap a floating object: a locked object refuses them.
+pub(super) fn has_floating_free(s: &Session) -> Option<&'static str> {
+    has_floating(s).or_else(|| selected_locked(s).then_some(LOCKED))
+}
+
+/// [`has_sizable`] for commands that resize: a locked object refuses them.
+pub(super) fn has_sizable_free(s: &Session) -> Option<&'static str> {
+    has_sizable(s).or_else(|| selected_locked(s).then_some(LOCKED))
+}
+
+/// One drawing object selected (a picture, shape, text box, group, chart or diagram), for
+/// `object.lock`.
+pub(super) fn has_one_object(s: &Session) -> Option<&'static str> {
+    match selected(s) {
+        Some(_) if picked_objects(s).len() > 1 => Some("select one object to lock or unlock"),
+        Some((_, o)) if o.frame().is_some() => None,
+        _ => Some("select a picture, shape or chart first"),
+    }
+}
+
+/// Any floating object, charts and diagrams included (placing one moves its frame only), not
+/// locked in place.
+pub(super) fn has_floating_object(s: &Session) -> Option<&'static str> {
+    match selected(s) {
+        Some((_, o)) if o.frame().is_some_and(|(_, _, f)| f.locked) => Some(LOCKED),
+        Some((_, o)) if o.is_floating() => None,
+        Some(_) => Some("this object is In Line with Text: only a floating object is placed by x and y"),
+        None => Some("select a floating object first"),
+    }
+}
+
 /// Stories whose objects can be moved, resized and arranged: the body and headers/footers.
 /// Objects in table cells (deeper paths), notes and text boxes stay where their text is.
 pub(super) fn movable_story(s: &Session, story: StoryRef) -> bool {

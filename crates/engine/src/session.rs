@@ -234,6 +234,10 @@ pub struct Session {
     order: Vec<u64>,
     /// Untitled documents made so far, for the next one's name (`Document3`).
     untitled_count: u32,
+    /// A chart drawn in other colours for a moment (`chart.preview`): where the chart is and the
+    /// graphic it is drawn with instead of its own. The document keeps the real chart; only the
+    /// layout swaps it in. An edit, a file command, a selection elsewhere or a change to the chart ends it.
+    pub(crate) chart_preview: Option<(Pos, Arc<wordcraft_doc::graphic::Graphic>)>,
 }
 
 impl Session {
