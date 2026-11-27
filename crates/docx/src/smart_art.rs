@@ -59,6 +59,20 @@ fn layout_id(l: SmartArtLayout) -> (&'static str, &'static str) {
         SmartArtLayout::Radial => ("urn:microsoft.com/office/officeart/2005/8/layout/radial1", "cycle"),
         SmartArtLayout::Matrix => ("urn:microsoft.com/office/officeart/2005/8/layout/matrix3", "matrix"),
         SmartArtLayout::Venn => ("urn:microsoft.com/office/officeart/2005/8/layout/venn1", "relationship"),
+        // Layouts with no built-in counterpart we know of: identifiers of our own, so a reader
+        // that doesn't know them uses the layout definition the file carries (see `layout_xml`).
+        SmartArtLayout::TimelineDots => ("urn:lilyoffice.com/smartart/2026/layout/timelineDots", "process"),
+        SmartArtLayout::TimelineNumbered => ("urn:lilyoffice.com/smartart/2026/layout/timelineNumbered", "process"),
+        SmartArtLayout::TimelineArrow => ("urn:lilyoffice.com/smartart/2026/layout/timelineArrow", "process"),
+        SmartArtLayout::TimelineVertical => ("urn:lilyoffice.com/smartart/2026/layout/timelineVertical", "process"),
+        SmartArtLayout::TeamCircles => ("urn:lilyoffice.com/smartart/2026/layout/teamCircles", "list"),
+        SmartArtLayout::TeamCards => ("urn:lilyoffice.com/smartart/2026/layout/teamCards", "list"),
+        SmartArtLayout::TeamPills => ("urn:lilyoffice.com/smartart/2026/layout/teamPills", "list"),
+        SmartArtLayout::CardNumbered => ("urn:lilyoffice.com/smartart/2026/layout/cardNumbered", "list"),
+        SmartArtLayout::CardBigNumbers => ("urn:lilyoffice.com/smartart/2026/layout/cardBigNumbers", "list"),
+        SmartArtLayout::CardHeader => ("urn:lilyoffice.com/smartart/2026/layout/cardHeader", "list"),
+        SmartArtLayout::CardTall => ("urn:lilyoffice.com/smartart/2026/layout/cardTall", "list"),
+        SmartArtLayout::CardRows => ("urn:lilyoffice.com/smartart/2026/layout/cardRows", "list"),
     }
 }
 
@@ -90,6 +104,27 @@ enum Paint {
     Light,
 }
 
+/// The colour of a shape's text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Ink {
+    /// The theme's light colour (on filled shapes).
+    Light,
+    /// The theme's dark text colour (on light fills or no fill).
+    Dark,
+    /// Theme accent `n` (1–6).
+    Accent(usize),
+}
+
+impl Ink {
+    fn scheme(self) -> String {
+        match self {
+            Ink::Light => "lt1".into(),
+            Ink::Dark => "tx1".into(),
+            Ink::Accent(n) => format!("accent{}", n.clamp(1, 6)),
+        }
+    }
+}
+
 /// One shape of a laid-out graphic, in points from the graphic's top-left corner.
 #[derive(Clone, Debug)]
 struct Sh {
@@ -98,8 +133,8 @@ struct Sh {
     /// Clockwise turn, degrees.
     rot: f32,
     flip_h: bool,
-    /// The preset's `adj` value, when not its default.
-    adj: Option<i64>,
+    /// The preset's adjust values (`adj`, `adj1`…) that differ from its defaults.
+    adj: Vec<(&'static str, i64)>,
     fill: Paint,
     /// Fill opacity (thousandths of a percent) for readers that blend.
     alpha: Option<u32>,
@@ -109,7 +144,13 @@ struct Sh {
     text: Vec<(String, bool)>,
     /// Where the text goes.
     tb: [f32; 4],
-    dark_text: bool,
+    ink: Ink,
+    /// Every paragraph's alignment (`l`, `ctr`, `r`); `None`: the item's line centred, sub-items left.
+    algn: Option<&'static str>,
+    /// Where the text sits in its box (`t`, `ctr`, `b`).
+    anchor: &'static str,
+    /// The text size against the graphic's (large numbers are more than 1).
+    scale: f32,
     /// The outline item this shape stands for (a node or its text), for picking one item.
     item: Option<usize>,
 }
@@ -122,14 +163,17 @@ impl Sh {
             b,
             rot: 0.0,
             flip_h: false,
-            adj: None,
+            adj: Vec::new(),
             fill: Paint::Accent(accent, None),
             alpha: None,
             line: Paint::Light,
             line_w: 1.0,
             text: Vec::new(),
             tb: inset(b, 0.06),
-            dark_text: false,
+            ink: Ink::Light,
+            algn: None,
+            anchor: "ctr",
+            scale: 1.0,
             item: None,
         }
     }
@@ -142,14 +186,17 @@ impl Sh {
             b,
             rot: 0.0,
             flip_h: (x1 - x0) * (y1 - y0) < 0.0,
-            adj: None,
+            adj: Vec::new(),
             fill: Paint::None,
             alpha: None,
             line: Paint::Accent(accent, Some(60_000)),
             line_w: 1.5,
             text: Vec::new(),
             tb: b,
-            dark_text: false,
+            ink: Ink::Light,
+            algn: None,
+            anchor: "ctr",
+            scale: 1.0,
             item: None,
         }
     }
@@ -215,6 +262,18 @@ fn layout(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
         SmartArtLayout::Radial => radial(spec, w, h),
         SmartArtLayout::Matrix => matrix(spec, w, h),
         SmartArtLayout::Venn => venn(spec, w, h),
+        SmartArtLayout::TimelineDots => timeline_dots(spec, w, h),
+        SmartArtLayout::TimelineNumbered => timeline_numbered(spec, w, h),
+        SmartArtLayout::TimelineArrow => timeline_arrow(spec, w, h),
+        SmartArtLayout::TimelineVertical => timeline_vertical(spec, w, h),
+        SmartArtLayout::TeamCircles => team_circles(spec, w, h),
+        SmartArtLayout::TeamCards => team_cards(spec, w, h),
+        SmartArtLayout::TeamPills => team_pills(spec, w, h),
+        SmartArtLayout::CardNumbered => card_numbered(spec, w, h, false),
+        SmartArtLayout::CardBigNumbers => card_numbered(spec, w, h, true),
+        SmartArtLayout::CardHeader => card_header(spec, w, h),
+        SmartArtLayout::CardTall => card_tall(spec, w, h),
+        SmartArtLayout::CardRows => card_rows(spec, w, h),
     }
 }
 
@@ -408,7 +467,7 @@ fn pyramid(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
             let inset_x = (bot_w - top_w) / 2.0;
             let ss = bot_w.min(bh).max(0.01);
             let mut s = Sh::node("trapezoid", b, accent);
-            s.adj = Some((inset_x / ss * 100_000.0).round().clamp(0.0, 10_000_000.0) as i64);
+            s.adj = vec![("adj", (inset_x / ss * 100_000.0).round().clamp(0.0, 10_000_000.0) as i64)];
             let mid_w = (top_w + bot_w) / 2.0 * 0.8;
             s.text_box([w / 2.0 - mid_w / 2.0, b[1] + bh * 0.08, mid_w, bh * 0.84])
         };
@@ -515,8 +574,381 @@ fn venn(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
         let mut s = Sh::node("rect", b, spec.colors.accent(j)).with_item(spec, i, true).text_box(b);
         s.fill = Paint::None;
         s.line = Paint::None;
-        s.dark_text = true;
+        s.ink = Ink::Dark;
         out.push(s);
+    }
+    out
+}
+
+// ---- timelines, team and text cards ----
+
+/// The paint of top item `k` of `n`: its accent, graded from full strength to light across the
+/// items when the graphic is in one accent.
+fn graded(spec: &SmartArtSpec, k: usize, n: usize) -> Paint {
+    let a = spec.colors.accent(k);
+    if spec.colors == SmartArtColors::Colorful || n <= 1 {
+        return Paint::Accent(a, None);
+    }
+    let t = 100_000 - 50_000 * k.min(n - 1) as u64 / (n - 1) as u64;
+    Paint::Accent(a, u32::try_from(t).ok().filter(|t| *t < 100_000))
+}
+
+/// A light tint of top item `k`'s accent (`most` to `least` kept), lighter for later items in a
+/// one-accent graphic.
+fn graded_light(spec: &SmartArtSpec, k: usize, n: usize, most: u32, least: u32) -> Paint {
+    let a = spec.colors.accent(k);
+    if spec.colors == SmartArtColors::Colorful || n <= 1 {
+        return Paint::Accent(a, Some(most));
+    }
+    let span = u64::from(most.saturating_sub(least));
+    let t = u64::from(most) - span * k.min(n - 1) as u64 / (n - 1) as u64;
+    Paint::Accent(a, Some(u32::try_from(t).unwrap_or(most)))
+}
+
+/// Text that reads on `p`: dark on any lightened accent and on no fill, light on full accents.
+fn ink_on(p: Paint) -> Ink {
+    match p {
+        Paint::Accent(_, Some(t)) if t < 90_000 => Ink::Dark,
+        Paint::Accent(..) => Ink::Light,
+        Paint::Light | Paint::None => Ink::Dark,
+    }
+}
+
+/// A shape filled with `fill`, no outline, text in a colour that reads on it.
+fn plain(prst: &'static str, b: [f32; 4], fill: Paint) -> Sh {
+    let mut s = Sh::node(prst, b, 1);
+    s.fill = fill;
+    s.line = Paint::None;
+    s.ink = ink_on(fill);
+    s
+}
+
+/// Item `i`'s own line (`own`) and the lines of the items under it (`kids`), without bullets.
+fn lines_of(spec: &SmartArtSpec, i: usize, own: bool, kids: bool) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    if own {
+        out.push((spec.items.get(i).map(|it| it.text.clone()).unwrap_or_default(), false));
+    }
+    if kids {
+        out.extend(spec.descendants(i).filter_map(|j| spec.items.get(j)).map(|it| (it.text.clone(), true)));
+    }
+    out
+}
+
+/// Item `i`'s text (and the items under it) in a box with no fill, in dark text.
+fn label(spec: &SmartArtSpec, i: usize, b: [f32; 4], algn: &'static str, anchor: &'static str) -> Sh {
+    let mut s = plain("rect", b, Paint::None);
+    s.text = lines_of(spec, i, true, true);
+    s.item = Some(i);
+    s.tb = b;
+    s.algn = Some(algn);
+    s.anchor = anchor;
+    s
+}
+
+/// `s` with one line of `text` in `algn`, in `ink`, `scale` times the graphic's text size.
+fn with_text(mut s: Sh, text: String, algn: &'static str, ink: Ink, scale: f32) -> Sh {
+    s.text = vec![(text, false)];
+    s.algn = Some(algn);
+    s.ink = ink;
+    s.scale = scale;
+    s
+}
+
+/// A person placeholder in the square `b`: a circle in `bg` with a head and shoulders in `fg`.
+fn avatar(b: [f32; 4], bg: Paint, fg: Paint, item: usize) -> Vec<Sh> {
+    let [x, y, s, _] = b;
+    let cx = x + s / 2.0;
+    let circle = plain("ellipse", [x, y, s, s], bg).of_item(item);
+    let head = plain("ellipse", [cx - 0.17 * s, y + 0.18 * s, 0.34 * s, 0.34 * s], fg);
+    // The upper half of an ellipse whose box ends at the circle's bottom (no box leaves the circle's).
+    let mut shoulders = plain("pie", [cx - 0.3 * s, y + 0.58 * s, 0.6 * s, 0.42 * s], fg);
+    shoulders.adj = vec![("adj1", 10_800_000), ("adj2", 0)];
+    vec![circle, head, shoulders]
+}
+
+/// Dots on a line across the middle; each item's text above its dot, then below, in turn,
+/// joined to it by a short stem.
+fn timeline_dots(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let cy = h / 2.0;
+    let d = (cw * 0.16).min(h * 0.09);
+    let gap = d / 2.0 + h * 0.04;
+    let lw = if n > 1 { cw * 1.8 } else { cw * 0.96 }.min(w);
+    let lh = (cy - gap).max(0.0);
+    let mut line = Sh::line(0.0, cy, w, cy, spec.colors.accent(0));
+    line.line_w = 2.0;
+    let mut out = vec![line];
+    for (k, &i) in tops.iter().enumerate() {
+        let cx = cw * (k as f32 + 0.5);
+        let x = (cx - lw / 2.0).clamp(0.0, (w - lw).max(0.0));
+        let above = k % 2 == 0;
+        let b = if above { [x, cy - gap - lh, lw, lh] } else { [x, cy + gap, lw, lh] };
+        out.push(label(spec, i, b, "ctr", if above { "b" } else { "t" }));
+        let end = if above { cy - gap } else { cy + gap };
+        let mut stem = Sh::line(cx, cy, cx, end, spec.colors.accent(k));
+        stem.line_w = 1.0;
+        out.push(stem);
+        let mut dot = plain("ellipse", [cx - d / 2.0, cy - d / 2.0, d, d], graded(spec, k, n)).of_item(i);
+        dot.line = Paint::Light;
+        dot.line_w = 1.5;
+        out.push(dot);
+    }
+    out
+}
+
+/// Numbered circles joined by a line near the top; each item's text under its circle.
+fn timeline_numbered(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let d = (cw * 0.42).min(h * 0.3);
+    // The circles and about a third of the height of text, centred top to bottom.
+    let cy = ((h - d - h * 0.37) / 2.0).max(h * 0.05) + d / 2.0;
+    let ty = cy + d / 2.0 + h * 0.05;
+    let mut out = Vec::new();
+    if n > 1 {
+        let mut line = Sh::line(cw / 2.0, cy, w - cw / 2.0, cy, spec.colors.accent(0));
+        line.line_w = 2.0;
+        out.push(line);
+    }
+    for (k, &i) in tops.iter().enumerate() {
+        let cx = cw * (k as f32 + 0.5);
+        out.push(label(spec, i, [cx - cw * 0.47, ty, cw * 0.94, (h * 0.98 - ty).max(0.0)], "ctr", "t"));
+        let p = graded(spec, k, n);
+        let b = [cx - d / 2.0, cy - d / 2.0, d, d];
+        let mut c = with_text(plain("ellipse", b, p), (k + 1).to_string(), "ctr", ink_on(p), 1.0).of_item(i).text_box(inset(b, ROUND_INSET));
+        c.line = Paint::Light;
+        c.line_w = 2.0;
+        out.push(c);
+    }
+    out
+}
+
+/// A light arrow-shaped band near the top with a dot per item on it; each item's text under its dot.
+fn timeline_arrow(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let bh = h * 0.18;
+    let by = ((h - bh - h * 0.37) / 2.0).max(h * 0.05);
+    // The items share the band short of its point.
+    let cw = (w - bh / 2.0).max(0.0) / n as f32;
+    let d = (bh * 0.55).min(cw * 0.3);
+    let cy = by + bh / 2.0;
+    let ty = by + bh + h * 0.05;
+    let mut out = vec![plain("homePlate", [0.0, by, w, bh], Paint::Accent(spec.colors.accent(0), Some(30_000)))];
+    for (k, &i) in tops.iter().enumerate() {
+        let cx = cw * (k as f32 + 0.5);
+        out.push(label(spec, i, [cx - cw * 0.47, ty, cw * 0.94, (h * 0.98 - ty).max(0.0)], "ctr", "t"));
+        let mut dot = plain("ellipse", [cx - d / 2.0, cy - d / 2.0, d, d], graded(spec, k, n)).of_item(i);
+        dot.line = Paint::Light;
+        dot.line_w = 2.0;
+        out.push(dot);
+    }
+    out
+}
+
+/// Dots down a line in the middle; each item's text to the right of its dot, then the left, in turn.
+fn timeline_vertical(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let rh = h / n as f32;
+    let x = w / 2.0;
+    let d = (rh * 0.3).min(w * 0.05);
+    let gap = d / 2.0 + w * 0.03;
+    let mut out = Vec::new();
+    if n > 1 {
+        let mut line = Sh::line(x, rh / 2.0, x, h - rh / 2.0, spec.colors.accent(0));
+        line.line_w = 2.0;
+        out.push(line);
+    }
+    for (k, &i) in tops.iter().enumerate() {
+        let (y, cy) = (rh * k as f32, rh * (k as f32 + 0.5));
+        let tw = (x - gap).max(0.0);
+        let sh = if k % 2 == 0 { label(spec, i, [x + gap, y, tw, rh], "l", "ctr") } else { label(spec, i, [0.0, y, tw, rh], "r", "ctr") };
+        out.push(sh);
+        let mut dot = plain("ellipse", [x - d / 2.0, cy - d / 2.0, d, d], graded(spec, k, n)).of_item(i);
+        dot.line = Paint::Light;
+        dot.line_w = 1.5;
+        out.push(dot);
+    }
+    out
+}
+
+/// A person placeholder per item in a row; each item's text under it.
+fn team_circles(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let s = (cw * 0.62).min(h * 0.5);
+    let y0 = ((h - s - h * 0.37) / 2.0).max(h * 0.04);
+    let ty = y0 + s + h * 0.05;
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let cx = cw * (k as f32 + 0.5);
+        out.push(label(spec, i, [cx - cw * 0.47, ty, cw * 0.94, (h * 0.98 - ty).max(0.0)], "ctr", "t"));
+        out.extend(avatar([cx - s / 2.0, y0, s, s], graded(spec, k, n), Paint::Light, i));
+    }
+    out
+}
+
+/// A light card per item, stacked: a person placeholder on the left, the item's text beside it.
+fn team_cards(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let rh = h / n as f32;
+    let ch = rh * 0.84;
+    let s = (ch * 0.76).min(w * 0.3);
+    let pad = ch * 0.12;
+    let tx = pad + s + pad * 1.5;
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let y = rh * k as f32 + (rh - ch) / 2.0;
+        let mut card = plain("roundRect", [0.0, y, w, ch], Paint::Accent(spec.colors.accent(k), Some(18_000)));
+        card.text = lines_of(spec, i, true, true);
+        card.item = Some(i);
+        card.tb = [tx, y, (w - tx - pad).max(0.0), ch];
+        card.algn = Some("l");
+        out.push(card);
+        out.extend(avatar([pad, y + (ch - s) / 2.0, s, s], graded(spec, k, n), Paint::Light, i));
+    }
+    out
+}
+
+/// Tall rounded cards in the items' colours: the text on top, a person placeholder at the bottom.
+fn team_pills(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let pw = (cw * 0.84).min(h * 0.45);
+    let (y0, ph) = (h * 0.02, h * 0.96);
+    let s = pw * 0.72;
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let cx = cw * (k as f32 + 0.5);
+        let x = cx - pw / 2.0;
+        let p = graded(spec, k, n);
+        let mut pill = plain("roundRect", [x, y0, pw, ph], p);
+        pill.adj = vec![("adj", 50_000)];
+        pill.text = lines_of(spec, i, true, true);
+        pill.item = Some(i);
+        pill.tb = [x + pw * 0.1, y0 + pw * 0.3, pw * 0.8, (ph - pw * 0.45 - s).max(0.0)];
+        pill.algn = Some("ctr");
+        pill.anchor = "t";
+        out.push(pill);
+        let ay = y0 + ph - s - pw * 0.14;
+        out.extend(avatar([cx - s / 2.0, ay, s, s], Paint::Light, Paint::Accent(spec.colors.accent(k), None), i));
+    }
+    out
+}
+
+/// Columns of text under a number in the item's colour: `big` writes large two-digit numbers
+/// over a short rule; otherwise a single digit, with a bar down the column's left side.
+fn card_numbered(spec: &SmartArtSpec, w: f32, h: f32, big: bool) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let bar = if big { 0.0 } else { (cw * 0.02).clamp(1.5, 4.0).min(cw * 0.1) };
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let col = cw * k as f32;
+        let x0 = col + cw * 0.04;
+        let tx = x0 + if big { 0.0 } else { bar + cw * 0.06 };
+        let tw = (col + cw * 0.92 - tx).max(0.0);
+        let body_y = if big { h * 0.4 } else { h * 0.32 };
+        out.push(label(spec, i, [tx, body_y, tw, (h * 0.96 - body_y).max(0.0)], "l", "t"));
+        let a = spec.colors.accent(k);
+        if big {
+            let mut rule = Sh::line(tx, h * 0.34, tx + tw * 0.3, h * 0.34, a);
+            rule.line = graded(spec, k, n);
+            rule.line_w = 2.0;
+            out.push(rule);
+        } else {
+            out.push(plain("rect", [x0, h * 0.06, bar, h * 0.88], graded(spec, k, n)).of_item(i));
+        }
+        let num = if big { format!("{:02}", k + 1) } else { (k + 1).to_string() };
+        let nb = [tx, h * 0.04, tw, h * 0.26];
+        let mut s = with_text(plain("rect", nb, Paint::None), num, "l", Ink::Accent(a), if big { 2.0 } else { 1.5 }).text_box(nb);
+        s.anchor = "b";
+        out.push(s);
+    }
+    out
+}
+
+/// Light cards with the item's text in a band of its colour and the items under it below.
+fn card_header(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let (y0, ch) = (h * 0.03, h * 0.94);
+    let band = ch * 0.26;
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let (x0, card_w) = (cw * k as f32 + cw * 0.04, cw * 0.92);
+        let mut card = plain("rect", [x0, y0, card_w, ch], Paint::Accent(spec.colors.accent(k), Some(15_000)));
+        card.text = lines_of(spec, i, false, true);
+        card.item = Some(i);
+        card.tb = [x0 + card_w * 0.08, y0 + band + ch * 0.05, card_w * 0.84, (ch - band - ch * 0.1).max(0.0)];
+        card.algn = Some("l");
+        card.anchor = "t";
+        out.push(card);
+        let p = graded(spec, k, n);
+        let bb = [x0, y0, card_w, band];
+        let own = spec.items.get(i).map(|it| it.text.clone()).unwrap_or_default();
+        out.push(with_text(plain("rect", bb, p), own, "l", ink_on(p), 1.0).of_item(i).text_box([x0 + card_w * 0.08, y0, card_w * 0.84, band]));
+    }
+    out
+}
+
+/// Tall tinted cards, each with a numbered circle on top and the item's text under it.
+fn card_tall(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let (y0, ch) = (h * 0.03, h * 0.94);
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let (x0, card_w) = (cw * k as f32 + cw * 0.05, cw * 0.9);
+        let mut card = plain("roundRect", [x0, y0, card_w, ch], graded_light(spec, k, n, 45_000, 20_000));
+        card.adj = vec![("adj", 8_000)];
+        card.text = lines_of(spec, i, true, true);
+        card.item = Some(i);
+        card.tb = [x0 + card_w * 0.1, y0 + ch * 0.38, card_w * 0.8, ch * 0.56];
+        card.algn = Some("ctr");
+        card.anchor = "t";
+        out.push(card);
+        let d = (card_w * 0.4).min(ch * 0.24);
+        let b = [x0 + (card_w - d) / 2.0, y0 + ch * 0.08, d, d];
+        let a = spec.colors.accent(k);
+        out.push(
+            with_text(plain("ellipse", b, Paint::Light), (k + 1).to_string(), "ctr", Ink::Accent(a), 1.0).of_item(i).text_box(inset(b, ROUND_INSET)),
+        );
+    }
+    out
+}
+
+/// Rows, each with a numbered square in the item's colour and the item's text beside it, a thin
+/// rule between rows.
+fn card_rows(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let rh = h / n as f32;
+    let s = (rh * 0.7).min(w * 0.15);
+    let tx = s + w * 0.04;
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let y = rh * k as f32;
+        out.push(label(spec, i, [tx, y, (w - tx).max(0.0), rh], "l", "ctr"));
+        let p = graded(spec, k, n);
+        let b = [0.0, y + (rh - s) / 2.0, s, s];
+        out.push(with_text(plain("rect", b, p), (k + 1).to_string(), "ctr", ink_on(p), 1.0).of_item(i).text_box(inset(b, 0.15)));
+        if k + 1 < n {
+            let mut rule = Sh::line(tx, y + rh, w, y + rh, spec.colors.accent(k));
+            rule.line_w = 0.75;
+            out.push(rule);
+        }
     }
     out
 }
@@ -525,6 +957,9 @@ fn venn(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
 
 /// Whether `paras` fit a `w` × `h` text box at `size` points (sub-items at [`CHILD`] of it).
 fn fits(paras: &[(String, bool)], size: f32, w: f32, h: f32) -> bool {
+    if !(size.is_finite() && w.is_finite() && h.is_finite()) {
+        return false;
+    }
     let mut total = 0.0;
     for (t, child) in paras {
         let s = if *child { child_size(size) } else { size };
@@ -544,7 +979,7 @@ fn child_size(size: f32) -> f32 {
 /// The largest text size (half points, [`MIN_SIZE`]–[`MAX_SIZE`]) at which every shape's text fits.
 fn text_size(shapes: &[Sh]) -> f32 {
     let mut size = MAX_SIZE;
-    while size > MIN_SIZE && !shapes.iter().filter(|s| !s.text.is_empty()).all(|s| fits(&s.text, size, s.tb[2], s.tb[3])) {
+    while size > MIN_SIZE && !shapes.iter().filter(|s| !s.text.is_empty()).all(|s| fits(&s.text, size * s.scale, s.tb[2], s.tb[3])) {
         size -= 0.5;
     }
     size
@@ -626,13 +1061,14 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
     x.empty("a:ext", &[("cx", &emu(sh.b[2].max(0.0))), ("cy", &emu(sh.b[3].max(0.0)))]);
     x.close("a:xfrm");
     x.open("a:prstGeom", &[("prst", sh.prst)]);
-    match sh.adj {
-        Some(v) => {
-            x.open("a:avLst", &[]);
-            x.empty("a:gd", &[("name", "adj"), ("fmla", &format!("val {v}"))]);
-            x.close("a:avLst");
+    if sh.adj.is_empty() {
+        x.empty("a:avLst", &[]);
+    } else {
+        x.open("a:avLst", &[]);
+        for (name, v) in &sh.adj {
+            x.empty("a:gd", &[("name", name), ("fmla", &format!("val {v}"))]);
         }
-        None => x.empty("a:avLst", &[]),
+        x.close("a:avLst");
     }
     x.close("a:prstGeom");
     paint(x, sh.fill, sh.alpha);
@@ -646,7 +1082,9 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
         x.close("a:ln");
     }
     x.close("dsp:spPr");
-    let text_clr = if sh.dark_text { "tx1" } else { "lt1" };
+    let text_clr = sh.ink.scheme();
+    let text_clr = text_clr.as_str();
+    let size = size * if sh.scale.is_finite() { sh.scale.clamp(0.1, 10.0) } else { 1.0 };
     x.open("dsp:style", &[]);
     for (name, idx) in [("a:lnRef", "2"), ("a:fillRef", "1"), ("a:effectRef", "0")] {
         x.open(name, &[("idx", idx)]);
@@ -671,7 +1109,7 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
                 ("bIns", "0"),
                 ("numCol", "1"),
                 ("spcCol", "0"),
-                ("anchor", "ctr"),
+                ("anchor", sh.anchor),
                 ("anchorCtr", "0"),
             ],
         );
@@ -681,7 +1119,8 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
         for (t, child) in &sh.text {
             let s = if *child { child_size(size) } else { size };
             x.open("a:p", &[]);
-            x.open("a:pPr", &[("lvl", if *child { "1" } else { "0" }), ("algn", if *child { "l" } else { "ctr" })]);
+            let algn = sh.algn.unwrap_or(if *child { "l" } else { "ctr" });
+            x.open("a:pPr", &[("lvl", if *child { "1" } else { "0" }), ("algn", algn)]);
             x.empty("a:buNone", &[]);
             x.close("a:pPr");
             if t.is_empty() {
@@ -930,11 +1369,37 @@ pub fn layout_xml(l: SmartArtLayout) -> String {
         SmartArtLayout::Radial => ("cycle", &[("stAng", "0"), ("spanAng", "360"), ("ctrShpMap", "fNode")]),
         SmartArtLayout::Hierarchy => ("hierChild", &[("linDir", "fromL"), ("chAlign", "t")]),
         SmartArtLayout::Pyramid => ("pyra", &[("linDir", "fromT")]),
+        SmartArtLayout::TimelineDots
+        | SmartArtLayout::TimelineNumbered
+        | SmartArtLayout::TimelineArrow
+        | SmartArtLayout::TeamCircles
+        | SmartArtLayout::TeamPills
+        | SmartArtLayout::CardNumbered
+        | SmartArtLayout::CardBigNumbers
+        | SmartArtLayout::CardHeader
+        | SmartArtLayout::CardTall => ("lin", &[("linDir", "fromL"), ("nodeVertAlign", "t")]),
+        SmartArtLayout::TimelineVertical | SmartArtLayout::TeamCards | SmartArtLayout::CardRows => ("lin", &[("linDir", "fromT")]),
     };
     let shape = match l {
-        SmartArtLayout::BasicList => "rect",
-        SmartArtLayout::Process | SmartArtLayout::Hierarchy | SmartArtLayout::Matrix => "roundRect",
-        SmartArtLayout::Cycle | SmartArtLayout::Radial | SmartArtLayout::Venn => "ellipse",
+        SmartArtLayout::BasicList
+        | SmartArtLayout::CardNumbered
+        | SmartArtLayout::CardBigNumbers
+        | SmartArtLayout::CardHeader
+        | SmartArtLayout::CardRows
+        | SmartArtLayout::TimelineVertical => "rect",
+        SmartArtLayout::Process
+        | SmartArtLayout::Hierarchy
+        | SmartArtLayout::Matrix
+        | SmartArtLayout::TeamCards
+        | SmartArtLayout::TeamPills
+        | SmartArtLayout::CardTall => "roundRect",
+        SmartArtLayout::Cycle
+        | SmartArtLayout::Radial
+        | SmartArtLayout::Venn
+        | SmartArtLayout::TimelineDots
+        | SmartArtLayout::TimelineNumbered
+        | SmartArtLayout::TimelineArrow
+        | SmartArtLayout::TeamCircles => "ellipse",
         SmartArtLayout::Pyramid => "trapezoid",
     };
     layout_node(&mut w, LayoutNode { name: "diagram", style: None, alg, params, shape: None, pres_of: &[] }, |w| match l {
@@ -1213,6 +1678,10 @@ mod tests {
                 // Hierarchy and radial draw every item as its own shape; the others draw sub-items as bullets.
                 let own = it.level == 0 || matches!(layout, SmartArtLayout::Hierarchy | SmartArtLayout::Radial);
                 let node = nodes.iter().find(|n| n.item == i);
+                // Sub-items of the other layouts are lines in their item's text, never their own node.
+                if !own {
+                    assert!(node.is_none(), "{layout:?}: sub-item {i} has a node");
+                }
                 if !own {
                     continue;
                 }
@@ -1225,6 +1694,29 @@ mod tests {
                 }
             }
             assert_eq!(smart_art_item_at(&spec, 400.0, 250.0, -10.0, -10.0), None, "{layout:?}: outside");
+        }
+    }
+
+    #[test]
+    fn every_shape_box_stays_in_the_frame_and_text_on_light_fills_is_dark() {
+        for layout in SmartArtLayout::ALL {
+            for n in [1usize, 3, 7] {
+                let mut spec = SmartArtSpec::sample(layout);
+                spec.items = (0..n).flat_map(|k| [SmartArtItem::new(format!("Item {k}"), 0), SmartArtItem::new("line", 1)]).collect();
+                let spec = spec.sanitized();
+                for (w, h) in [(432.0, 252.0), (120.0, 300.0), (600.0, 80.0)] {
+                    for sh in super::layout(&spec, w, h) {
+                        let [x, y, bw, bh] = sh.b;
+                        assert!(x >= -0.5 && y >= -0.5 && x + bw <= w + 0.5 && y + bh <= h + 0.5, "{layout:?} {n} {w}x{h}: {:?} {:?}", sh.prst, sh.b);
+                        if !sh.text.is_empty()
+                            && let Paint::Accent(_, Some(t)) = sh.fill
+                            && t < 90_000
+                        {
+                            assert_ne!(sh.ink, Ink::Light, "{layout:?}: light text on a light fill");
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -460,7 +460,12 @@ fn text(sp: &El, xf: Xf, b: [f64; 4], theme: &[Rgb], filled: bool, fit: f32, out
         }
     }
     let total: f32 = lines.iter().map(|l| l.size * LINE).sum();
-    let mut y = y0 + (th - total) / 2.0;
+    // Top or bottom when the body says so; centred otherwise (diagram text usually is).
+    let mut y = match body.and_then(|p| p.attr("anchor")) {
+        Some("t") => y0,
+        Some("b") => y0 + th - total,
+        _ => y0 + (th - total) / 2.0,
+    };
     for l in lines {
         let lh = l.size * LINE;
         out.push(GraphicItem::Text {

@@ -14,7 +14,8 @@ use crate::WordApp;
 use crate::theme::{Tokens, c32, regular, semibold};
 
 /// The picker's categories (`All` first), in the order shown.
-pub const CATEGORIES: [&str; 8] = ["All", "List", "Process", "Cycle", "Hierarchy", "Relationship", "Matrix", "Pyramid"];
+pub const CATEGORIES: [&str; 11] =
+    ["All", "List", "Process", "Cycle", "Hierarchy", "Relationship", "Matrix", "Pyramid", "Timeline", "Meet the Team", "Text Cards"];
 
 /// Insert › SmartArt: the category shown and the layout picked.
 #[derive(Clone, Debug, Serialize)]
@@ -128,6 +129,51 @@ pub fn preview(p: &Painter, r: Rect, layout: SmartArtLayout, colors: SmartArtCol
                 let q = c + vec2(a.cos(), a.sin()) * s * 0.15;
                 p.circle_filled(q, s * 0.3, col(k).gamma_multiply(0.5));
                 p.circle_stroke(q, s * 0.3, Stroke::new(1.0, col(k)));
+            }
+        }
+        SmartArtLayout::TimelineDots | SmartArtLayout::TimelineArrow | SmartArtLayout::TimelineNumbered => {
+            let y = if layout == SmartArtLayout::TimelineDots { 0.5 } else { 0.3 };
+            p.line_segment([at(0.0, y), at(1.0, y)], Stroke::new(1.5, line));
+            for k in 0..4 {
+                let x = 0.125 + 0.25 * k as f32;
+                let r = if layout == SmartArtLayout::TimelineNumbered { 0.07 } else { 0.045 };
+                p.circle_filled(at(x, y), s * r, col(k));
+                let ty = if layout == SmartArtLayout::TimelineDots && k % 2 == 0 { 0.32 } else { y + 0.18 };
+                block(x - 0.08, ty, x + 0.08, ty + 0.04, k, 0.0);
+            }
+        }
+        SmartArtLayout::TimelineVertical => {
+            p.line_segment([at(0.5, 0.05), at(0.5, 0.95)], Stroke::new(1.5, line));
+            for k in 0..4 {
+                let y = 0.125 + 0.25 * k as f32;
+                p.circle_filled(at(0.5, y), s * 0.04, col(k));
+                let x = if k % 2 == 0 { 0.58 } else { 0.12 };
+                block(x, y - 0.02, x + 0.3, y + 0.02, k, 0.0);
+            }
+        }
+        SmartArtLayout::TeamCircles | SmartArtLayout::TeamPills => {
+            for k in 0..3 {
+                let x = 0.17 + 0.33 * k as f32;
+                if layout == SmartArtLayout::TeamPills {
+                    block(x - 0.12, 0.05, x + 0.12, 0.95, k, s * 0.12);
+                }
+                p.circle_filled(at(x, if layout == SmartArtLayout::TeamPills { 0.75 } else { 0.35 }), s * 0.1, col(k).gamma_multiply(0.7));
+            }
+        }
+        SmartArtLayout::TeamCards | SmartArtLayout::CardRows => {
+            for k in 0..3 {
+                let y = 0.05 + 0.32 * k as f32;
+                block(0.0, y, 0.22, y + 0.26, k, 2.0);
+                block(0.3, y + 0.1, 0.9, y + 0.15, k, 0.0);
+            }
+        }
+        SmartArtLayout::CardNumbered | SmartArtLayout::CardBigNumbers | SmartArtLayout::CardHeader | SmartArtLayout::CardTall => {
+            for k in 0..3 {
+                let x = 0.02 + 0.33 * k as f32;
+                let head = if layout == SmartArtLayout::CardTall { 0.9 } else { 0.25 };
+                block(x, 0.05, x + 0.29, 0.05 + head, k, 2.0);
+                p.line_segment([at(x + 0.03, 0.5), at(x + 0.25, 0.5)], thin);
+                p.line_segment([at(x + 0.03, 0.62), at(x + 0.2, 0.62)], thin);
             }
         }
     }
