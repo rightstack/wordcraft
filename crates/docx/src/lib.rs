@@ -35,6 +35,11 @@ pub use flat::{XmlKind, sniff_xml, write as write_flat};
 pub use fonts::{EmbeddedFont, embedded_fonts};
 pub use read::read;
 pub use smart_art::{SmartArtNode, smart_art_item_at, smart_art_items, smart_art_nodes};
+/// SmartArt diagram parts for other containers (a presentation's slides use the same five parts).
+pub use smart_art::{
+    colors_xml as smart_art_colors_xml, data_xml as smart_art_data_xml, drawing_xml as smart_art_drawing_xml, layout_xml as smart_art_layout_xml,
+    quick_style_xml as smart_art_quick_style_xml, spec_of_xml as smart_art_spec_of_xml,
+};
 pub use wordml2003_write::write as write_wordml2003;
 pub use write::{write, write_as};
 

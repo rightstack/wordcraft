@@ -986,6 +986,11 @@ pub fn quick_style_xml() -> String {
 
 // ---- reading back ----
 
+/// [`spec_of`] for a data part's bytes (another container — a presentation — holding the same parts).
+pub fn spec_of_xml(data: &str) -> Option<SmartArtSpec> {
+    spec_of(&xml::parse(data.as_bytes()).ok()?)
+}
+
 /// The graphic a data part holds, when the part is exactly what [`data_xml`] writes for it (so
 /// editing and saving it loses nothing). `None` for any other diagram.
 pub(crate) fn spec_of(data: &El) -> Option<SmartArtSpec> {

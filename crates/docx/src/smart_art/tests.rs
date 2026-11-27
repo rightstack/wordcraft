@@ -18,6 +18,7 @@ fn every_layout_reads_back_and_draws_inside_its_frame() {
             spec.items.push(SmartArtItem::new("Under <last> & more", 1));
             let spec = spec.sanitized();
             assert_eq!(spec_of(&parse(&data_xml(&spec, "rId9"))).as_ref(), Some(&spec), "{layout:?}");
+            assert_eq!(spec_of_xml(&data_xml(&spec, "rId9")).as_ref(), Some(&spec), "{layout:?} from bytes");
             let items = smart_art_items(&spec, &THEME_COLORS, 400.0, 250.0);
             assert!(items.iter().any(|i| matches!(i, GraphicItem::Text { .. })), "{layout:?} has text");
             for it in &items {
