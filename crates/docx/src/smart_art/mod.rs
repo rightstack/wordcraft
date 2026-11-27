@@ -43,11 +43,22 @@ const QUICK_STYLE_ID: &str = "urn:microsoft.com/office/officeart/2005/8/quicksty
 const EMU_PT: f32 = 12_700.0;
 /// Line height as a multiple of the font size (as the drawing reader stacks lines).
 const LINE: f32 = 1.2;
-/// Largest and smallest text size a graphic is given, points.
-const MAX_SIZE: f32 = 24.0;
+/// Largest item text size, points: Word's Heading 1 (16 pt), so a graphic's items never read
+/// louder than a document heading and their sub-items land near body text (see [`CHILD`]).
+const MAX_SIZE: f32 = 16.0;
+/// The item text size is at most the graphic's short side over this (a small graphic gets
+/// smaller text, so it isn't crowded: 252 pt tall → the 16 pt cap, 150 pt → 10.5 pt).
+const SIZE_PER_SIDE: f32 = 14.0;
+/// Smallest text size a graphic is given, points.
 const MIN_SIZE: f32 = 5.0;
-/// A sub-item's text size against its item's.
-const CHILD: f32 = 0.8;
+/// A sub-item's text size against its item's (at most), so it reads clearly as the smaller line.
+const CHILD: f32 = 0.65;
+/// How far a sub-item's size may shrink (against its item's) so its lines don't break…
+const CHILD_LEAST: f32 = 0.55;
+/// …but never below this, points (unless [`CHILD`] of the item size already is).
+const CHILD_FLOOR: f32 = 8.0;
+/// How far the item size may shrink (against the largest that fits) so its lines don't break.
+const ONE_LINE: f32 = 0.8;
 /// Model ids of the drawing's shapes start here (the data model's points are below).
 const SHAPE_IDS: usize = 0x10000;
 
@@ -110,7 +121,22 @@ fn layout(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
     if spec.items.is_empty() || w < 1.0 || h < 1.0 {
         return Vec::new();
     }
-    layouts::draw(spec, w, h)
+    let mut shapes = layouts::draw(spec, w, h);
+    for s in shapes.iter_mut().filter(|s| !s.text.is_empty()) {
+        s.tb = padded(s.tb, s.fill != Paint::None);
+    }
+    shapes
+}
+
+/// A text box `tb` with room left inside it: inside a filled shape a margin on every side
+/// (6% of the box, 2–8 pt across and 1–6 pt down, at most 15% of it), so text never touches
+/// the shape's edge; text with nothing behind it keeps a little room either side only.
+fn padded(tb: [f32; 4], filled: bool) -> [f32; 4] {
+    let [x, y, w, h] = tb;
+    let (w, h) = (w.max(0.0), h.max(0.0));
+    let (px, py) =
+        if filled { ((w * 0.06).clamp(2.0, 8.0).min(w * 0.15), (h * 0.06).clamp(1.0, 6.0).min(h * 0.15)) } else { ((w * 0.02).min(3.0), 0.0) };
+    [x + px, y + py, w - 2.0 * px, h - 2.0 * py]
 }
 
 // ---- colours that read ----
@@ -240,14 +266,29 @@ fn fit_colours(shapes: &mut [Sh], theme: &[Rgb]) {
 
 // ---- text ----
 
-/// Whether `paras` fit a `w` × `h` text box at `size` points (sub-items at [`CHILD`] of it).
-fn fits(paras: &[(String, bool)], size: f32, w: f32, h: f32) -> bool {
-    if !(size.is_finite() && w.is_finite() && h.is_finite()) {
+/// The text sizes of a graphic, points: every item line in one size and every sub-item line in
+/// another (like Word, which keeps a graphic's text even), each times its shape's `scale`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Sizes {
+    item: f32,
+    child: f32,
+}
+
+/// `v` to the nearest half point.
+fn half(v: f32) -> f32 {
+    (v * 2.0).round() / 2.0
+}
+
+/// Whether `paras` fit a `w` × `h` text box with item lines at `size` and sub-item lines at
+/// `child` points. Lines wrap only at spaces (the drawing reader's [`wrap`]), so a word (a Korean
+/// eojeol) wider than the box never fits: the text shrinks rather than break inside a word.
+fn fits(paras: &[(String, bool)], size: f32, child: f32, w: f32, h: f32) -> bool {
+    if !(size.is_finite() && child.is_finite() && w.is_finite() && h.is_finite()) {
         return false;
     }
     let mut total = 0.0;
-    for (t, child) in paras {
-        let s = if *child { child_size(size) } else { size };
+    for (t, is_child) in paras {
+        let s = if *is_child { child } else { size };
         if t.split_whitespace().any(|word| text_width(word, s) > w) {
             return false;
         }
@@ -257,17 +298,72 @@ fn fits(paras: &[(String, bool)], size: f32, w: f32, h: f32) -> bool {
     total <= h
 }
 
-fn child_size(size: f32) -> f32 {
-    (size * CHILD * 2.0).round() / 2.0
+/// The shape's text scale (bounded).
+fn scale_of(s: &Sh) -> f32 {
+    if s.scale.is_finite() { s.scale.clamp(0.1, 10.0) } else { 1.0 }
 }
 
-/// The largest text size (half points, [`MIN_SIZE`]–[`MAX_SIZE`]) at which every shape's text fits.
-fn text_size(shapes: &[Sh]) -> f32 {
-    let mut size = MAX_SIZE;
-    while size > MIN_SIZE && !shapes.iter().filter(|s| !s.text.is_empty()).all(|s| fits(&s.text, size * s.scale, s.tb[2], s.tb[3])) {
+/// Whether every shape's text fits at `sz`.
+fn all_fit(shapes: &[Sh], sz: Sizes) -> bool {
+    shapes.iter().filter(|s| !s.text.is_empty()).all(|s| {
+        let k = scale_of(s);
+        fits(&s.text, sz.item * k, sz.child * k, s.tb[2], s.tb[3])
+    })
+}
+
+/// How many item lines (`child` false) or sub-item lines break in two or more at `sz`.
+fn broken(shapes: &[Sh], sz: Sizes, child: bool) -> usize {
+    shapes
+        .iter()
+        .map(|s| {
+            let k = scale_of(s);
+            let size = if child { sz.child } else { sz.item } * k;
+            s.text.iter().filter(|(t, c)| *c == child && wrap(t, size, s.tb[2], 10_000).len() > 1).count()
+        })
+        .sum()
+}
+
+/// Of the half-point sizes from `hi` down to `lo` that keep everything fitting (`at` turns a
+/// size into both sizes), the one that breaks the fewest lines of the kind `child`, the
+/// largest of those.
+fn least_broken(shapes: &[Sh], hi: f32, lo: f32, child: bool, at: impl Fn(f32) -> Sizes) -> f32 {
+    let mut best = (usize::MAX, hi);
+    let mut s = hi;
+    while s >= lo - 0.01 {
+        let sz = at(s);
+        if all_fit(shapes, sz) {
+            let n = broken(shapes, sz, child);
+            if n < best.0 {
+                best = (n, s);
+            }
+            if n == 0 {
+                break;
+            }
+        }
+        s -= 0.5;
+    }
+    best.1
+}
+
+/// The text sizes of a graphic laid out in a `w` × `h` box:
+/// 1. the item size: the largest half point up to [`MAX_SIZE`] (and the short side over
+///    [`SIZE_PER_SIDE`]) at which every shape's text fits with sub-items at [`CHILD`] of it;
+/// 2. shrunk by up to [`ONE_LINE`] if that keeps item lines from breaking (fewest broken);
+/// 3. the sub-item size: [`CHILD`] of the item size, shrunk down to [`CHILD_LEAST`] of it (not
+///    below [`CHILD_FLOOR`]) if that keeps sub-item lines from breaking (fewest broken).
+fn text_sizes(shapes: &[Sh], w: f32, h: f32) -> Sizes {
+    let with_child = |s: f32| Sizes { item: s, child: half(s * CHILD).max(MIN_SIZE) };
+    let short = w.min(h);
+    let cap = if short.is_finite() { half(short / SIZE_PER_SIDE).clamp(MIN_SIZE, MAX_SIZE) } else { MAX_SIZE };
+    let mut size = cap;
+    while size > MIN_SIZE && !all_fit(shapes, with_child(size)) {
         size -= 0.5;
     }
-    size
+    let item = least_broken(shapes, size, half(size * ONE_LINE).max(MIN_SIZE), false, with_child);
+    let top = with_child(item).child;
+    let floor = half(item * CHILD_LEAST).max(CHILD_FLOOR).min(top);
+    let child = least_broken(shapes, top, floor, true, |c| Sizes { item, child: c });
+    Sizes { item, child }
 }
 
 // ---- parts ----
@@ -328,7 +424,7 @@ fn scheme_clr(w: &mut W, val: &str, lum: Option<u32>) {
 pub fn drawing_xml(spec: &SmartArtSpec, theme: &[Rgb], w: f32, h: f32) -> String {
     let mut shapes = layout(spec, w, h);
     fit_colours(&mut shapes, theme);
-    let size = text_size(&shapes);
+    let size = text_sizes(&shapes, w, h);
     let mut x = W::new();
     x.open("dsp:drawing", &[("xmlns:dgm", NS_DGM), ("xmlns:dsp", NS_DSP), ("xmlns:a", NS_A)]);
     x.open("dsp:spTree", &[]);
@@ -345,7 +441,7 @@ pub fn drawing_xml(spec: &SmartArtSpec, theme: &[Rgb], w: f32, h: f32) -> String
     x.s
 }
 
-fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
+fn shape_xml(x: &mut W, sh: &Sh, id: &str, sizes: Sizes) {
     x.open("dsp:sp", &[("modelId", id)]);
     x.open("dsp:nvSpPr", &[]);
     x.empty("dsp:cNvPr", &[("id", "0"), ("name", "")]);
@@ -388,7 +484,8 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
     x.close("dsp:spPr");
     let (text_clr, text_lum) = sh.ink.scheme();
     let text_clr = text_clr.as_str();
-    let size = size * if sh.scale.is_finite() { sh.scale.clamp(0.1, 10.0) } else { 1.0 };
+    let k = scale_of(sh);
+    let (size, child_size) = (sizes.item * k, sizes.child * k);
     x.open("dsp:style", &[]);
     for (name, idx) in [("a:lnRef", "2"), ("a:fillRef", "1"), ("a:effectRef", "0")] {
         x.open(name, &[("idx", idx)]);
@@ -421,10 +518,11 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
         x.close("a:bodyPr");
         x.empty("a:lstStyle", &[]);
         for (t, child) in &sh.text {
-            let s = if *child { child_size(size) } else { size };
+            let s = if *child { child_size } else { size };
             x.open("a:p", &[]);
             let algn = sh.algn.unwrap_or(if *child { "l" } else { "ctr" });
-            x.open("a:pPr", &[("lvl", if *child { "1" } else { "0" }), ("algn", algn)]);
+            // eaLnBrk 0: an East Asian word (a Korean eojeol) is not broken in half (ECMA-376 §21.1.2.2.7).
+            x.open("a:pPr", &[("lvl", if *child { "1" } else { "0" }), ("algn", algn), ("eaLnBrk", "0")]);
             x.empty("a:buNone", &[]);
             x.close("a:pPr");
             if t.is_empty() {

@@ -520,6 +520,84 @@ fn the_target_list_is_a_quarter_target_in_the_lower_left_corner() {
     }
 }
 
+/// The Korean text-card samples the app's gallery inserts (`smartart-samples.ts`), whose sub-lines
+/// used to break in two.
+fn ko_cards() -> SmartArtSpec {
+    let items = [("아이디어", 0), ("왜 중요한가요", 1), ("계획", 0), ("어떻게 해 나갈까요", 1), ("결과", 0), ("무엇이 달라지나요", 1)];
+    SmartArtSpec { items: items.iter().map(|(t, l)| SmartArtItem::new(*t, *l)).collect(), ..Default::default() }
+}
+
+/// The text lines of `spec` drawn `w` × `h`: (text, size).
+fn drawn_lines(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<(String, f32)> {
+    smart_art_items(spec, &THEME_COLORS, w, h)
+        .into_iter()
+        .filter_map(|it| match it {
+            GraphicItem::Text { text, size, .. } => Some((text, size)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn text_is_capped_sub_lines_are_smaller_and_no_line_breaks_inside_an_eojeol() {
+    let mut bad = Vec::new();
+    // (Layouts whose sub-items are shapes of their own lay these samples out differently.)
+    for layout in SmartArtLayout::ALL.into_iter().filter(|l| !l.children_are_shapes()) {
+        let mut spec = ko_cards();
+        spec.layout = layout;
+        let spec = spec.sanitized();
+        let shapes = super::layout(&spec, 432.0, 252.0);
+        let sz = text_sizes(&shapes, 432.0, 252.0);
+        if sz.item > MAX_SIZE || sz.child >= sz.item || sz.child > sz.item * CHILD + 0.25 {
+            bad.push(format!("{layout:?}: {sz:?}"));
+        }
+        // Every drawn line is whole eojeols: each word of a line is a word of the item's text.
+        let words: Vec<&str> = spec.items.iter().flat_map(|it| it.text.split_whitespace()).collect();
+        for (line, size) in drawn_lines(&spec, 432.0, 252.0) {
+            // (Numbers and bullets the layout adds are not the item's words.)
+            let hangul = |w: &str| w.chars().any(|c| ('\u{AC00}'..='\u{D7A3}').contains(&c));
+            if line.split_whitespace().any(|w| hangul(w) && !words.contains(&w)) {
+                bad.push(format!("{layout:?}: {line:?} breaks a word"));
+            }
+            if size > MAX_SIZE * 3.0 {
+                bad.push(format!("{layout:?}: {line:?} at {size}"));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+#[test]
+fn the_header_cards_set_their_sub_lines_on_one_line_in_a_smaller_size() {
+    // 영일: "기본 값이 이렇게 줄바꿈이 되면 못 생겼잖아? 밑에는 글꼴이 더 작아야 예쁠텐데."
+    let mut spec = ko_cards();
+    spec.layout = SmartArtLayout::CardHeader;
+    let spec = spec.sanitized();
+    let lines = drawn_lines(&spec, 432.0, 252.0);
+    let texts: Vec<&str> = lines.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(texts, ["왜 중요한가요", "아이디어", "어떻게 해 나갈까요", "계획", "무엇이 달라지나요", "결과"]);
+    let size = |t: &str| lines.iter().find(|(l, _)| l == t).map(|l| l.1).unwrap();
+    assert!(size("아이디어") <= MAX_SIZE);
+    assert!(size("어떻게 해 나갈까요") <= size("아이디어") * CHILD + 0.25, "{lines:?}");
+    // The text sits inside its band with a margin: padded text boxes.
+    let shapes = super::layout(&spec, 432.0, 252.0);
+    for s in shapes.iter().filter(|s| !s.text.is_empty() && s.fill != Paint::None) {
+        assert!(s.tb[0] > s.b[0] + 1.9 && s.tb[0] + s.tb[2] < s.b[0] + s.b[2] - 1.9, "{s:?}");
+    }
+}
+
+#[test]
+fn a_small_graphic_gets_smaller_text_and_sizes_stay_in_range() {
+    let spec = SmartArtSpec::sample(SmartArtLayout::BasicList).sanitized();
+    let big = text_sizes(&super::layout(&spec, 432.0, 252.0), 432.0, 252.0);
+    let small = text_sizes(&super::layout(&spec, 250.0, 140.0), 250.0, 140.0);
+    assert!(small.item < big.item && big.item <= MAX_SIZE, "{small:?} {big:?}");
+    for (w, h) in [(f32::NAN, 10.0), (0.0, 0.0), (1.0e30, 5.0), (5.0, 1.0e30)] {
+        let sz = text_sizes(&super::layout(&spec, w, h), w, h);
+        assert!((MIN_SIZE..=MAX_SIZE).contains(&sz.item) && sz.child >= MIN_SIZE && sz.child <= sz.item, "{w} {h}: {sz:?}");
+    }
+}
+
 #[test]
 fn winding_processes_turn_back_at_each_line_end() {
     let centres = |layout: SmartArtLayout| -> Vec<(f32, f32)> {
