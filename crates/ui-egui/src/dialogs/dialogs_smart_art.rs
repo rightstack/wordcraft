@@ -131,14 +131,22 @@ pub fn preview(p: &Painter, r: Rect, layout: SmartArtLayout, colors: SmartArtCol
                 p.circle_stroke(q, s * 0.3, Stroke::new(1.0, col(k)));
             }
         }
-        SmartArtLayout::TimelineDots | SmartArtLayout::TimelineArrow | SmartArtLayout::TimelineNumbered => {
-            let y = if layout == SmartArtLayout::TimelineDots { 0.5 } else { 0.3 };
+        SmartArtLayout::TimelineDots
+        | SmartArtLayout::TimelineArrow
+        | SmartArtLayout::TimelineNumbered
+        | SmartArtLayout::TimelineStems
+        | SmartArtLayout::TimelineCircles
+        | SmartArtLayout::TimelineZigzag
+        | SmartArtLayout::TimelineLine => {
+            let middle = matches!(layout, SmartArtLayout::TimelineDots | SmartArtLayout::TimelineStems);
+            let y = if middle { 0.5 } else { 0.3 };
             p.line_segment([at(0.0, y), at(1.0, y)], Stroke::new(1.5, line));
             for k in 0..4 {
                 let x = 0.125 + 0.25 * k as f32;
-                let r = if layout == SmartArtLayout::TimelineNumbered { 0.07 } else { 0.045 };
+                let numbered = matches!(layout, SmartArtLayout::TimelineNumbered | SmartArtLayout::TimelineCircles | SmartArtLayout::TimelineZigzag);
+                let r = if numbered { 0.07 } else { 0.045 };
                 p.circle_filled(at(x, y), s * r, col(k));
-                let ty = if layout == SmartArtLayout::TimelineDots && k % 2 == 0 { 0.32 } else { y + 0.18 };
+                let ty = if middle && k % 2 == 0 { 0.32 } else { y + 0.18 };
                 block(x - 0.08, ty, x + 0.08, ty + 0.04, k, 0.0);
             }
         }
@@ -160,14 +168,19 @@ pub fn preview(p: &Painter, r: Rect, layout: SmartArtLayout, colors: SmartArtCol
                 p.circle_filled(at(x, if layout == SmartArtLayout::TeamPills { 0.75 } else { 0.35 }), s * 0.1, col(k).gamma_multiply(0.7));
             }
         }
-        SmartArtLayout::TeamCards | SmartArtLayout::CardRows => {
+        SmartArtLayout::TeamCards | SmartArtLayout::CardRows | SmartArtLayout::CardMarkerRows => {
             for k in 0..3 {
                 let y = 0.05 + 0.32 * k as f32;
                 block(0.0, y, 0.22, y + 0.26, k, 2.0);
                 block(0.3, y + 0.1, 0.9, y + 0.15, k, 0.0);
             }
         }
-        SmartArtLayout::CardNumbered | SmartArtLayout::CardBigNumbers | SmartArtLayout::CardHeader | SmartArtLayout::CardTall => {
+        SmartArtLayout::CardNumbered
+        | SmartArtLayout::CardBigNumbers
+        | SmartArtLayout::CardHeader
+        | SmartArtLayout::CardTall
+        | SmartArtLayout::CardEmphasis
+        | SmartArtLayout::CardSquares => {
             for k in 0..3 {
                 let x = 0.02 + 0.33 * k as f32;
                 let head = if layout == SmartArtLayout::CardTall { 0.9 } else { 0.25 };

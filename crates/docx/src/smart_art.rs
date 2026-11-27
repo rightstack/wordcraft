@@ -74,6 +74,13 @@ fn layout_id(l: SmartArtLayout) -> (&'static str, &'static str) {
         SmartArtLayout::CardHeader => ("urn:lilyoffice.com/smartart/2026/layout/cardHeader", "list"),
         SmartArtLayout::CardTall => ("urn:lilyoffice.com/smartart/2026/layout/cardTall", "list"),
         SmartArtLayout::CardRows => ("urn:lilyoffice.com/smartart/2026/layout/cardRows", "list"),
+        SmartArtLayout::TimelineStems => ("urn:lilyoffice.com/smartart/2026/layout/timelineStems", "process"),
+        SmartArtLayout::TimelineCircles => ("urn:lilyoffice.com/smartart/2026/layout/timelineCircles", "process"),
+        SmartArtLayout::TimelineZigzag => ("urn:lilyoffice.com/smartart/2026/layout/timelineZigzag", "process"),
+        SmartArtLayout::TimelineLine => ("urn:lilyoffice.com/smartart/2026/layout/timelineLine", "process"),
+        SmartArtLayout::CardEmphasis => ("urn:lilyoffice.com/smartart/2026/layout/cardEmphasis", "list"),
+        SmartArtLayout::CardMarkerRows => ("urn:lilyoffice.com/smartart/2026/layout/cardMarkerRows", "list"),
+        SmartArtLayout::CardSquares => ("urn:lilyoffice.com/smartart/2026/layout/cardSquares", "list"),
     }
 }
 
@@ -286,6 +293,13 @@ fn layout(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
         SmartArtLayout::CardHeader => card_header(spec, w, h),
         SmartArtLayout::CardTall => card_tall(spec, w, h),
         SmartArtLayout::CardRows => card_rows(spec, w, h),
+        SmartArtLayout::TimelineStems => timeline_stems(spec, w, h),
+        SmartArtLayout::TimelineCircles => timeline_circles(spec, w, h),
+        SmartArtLayout::TimelineZigzag => timeline_zigzag(spec, w, h),
+        SmartArtLayout::TimelineLine => timeline_line(spec, w, h),
+        SmartArtLayout::CardEmphasis => card_emphasis(spec, w, h),
+        SmartArtLayout::CardMarkerRows => card_marker_rows(spec, w, h),
+        SmartArtLayout::CardSquares => card_squares(spec, w, h),
     }
 }
 
@@ -965,6 +979,247 @@ fn card_rows(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
     out
 }
 
+/// Stems up from a line across the middle and down, in turn, each ending in a dot in the item's
+/// colour with the item's text beyond it.
+fn timeline_stems(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let cy = h / 2.0;
+    let d = (cw * 0.14).min(h * 0.07);
+    let stem = h * 0.17;
+    let gap = h * 0.03;
+    // Labels on one side are two columns apart, so each may take nearly two columns.
+    let lw = if n > 1 { cw * 1.8 } else { cw * 0.96 }.min(w);
+    let mut line = Sh::line(0.0, cy, w, cy, spec.colors.accent(0));
+    line.line_w = 2.0;
+    let mut out = vec![line];
+    for (k, &i) in tops.iter().enumerate() {
+        let cx = cw * (k as f32 + 0.5);
+        let up = k.is_multiple_of(2);
+        let end = if up { cy - stem } else { cy + stem };
+        let p = graded(spec, k, n);
+        let mut s = Sh::line(cx, cy, cx, end, spec.colors.accent(k));
+        s.line = p;
+        s.line_w = 1.5;
+        out.push(s);
+        out.push(plain("ellipse", [cx - d / 2.0, end - d / 2.0, d, d], p).of_item(i));
+        let x = (cx - lw / 2.0).clamp(0.0, (w - lw).max(0.0));
+        let b = if up {
+            let top = h * 0.02;
+            [x, top, lw, (end - d / 2.0 - gap - top).max(0.0)]
+        } else {
+            let top = end + d / 2.0 + gap;
+            [x, top, lw, (h * 0.98 - top).max(0.0)]
+        };
+        out.push(label(spec, i, b, "ctr", if up { "b" } else { "t" }));
+    }
+    out
+}
+
+/// Numbered circles overlapping along a line, larger and (in one accent) stronger towards the
+/// middle; each item's text under its circle.
+fn timeline_circles(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let mid = (n - 1) as f32 / 2.0;
+    // Centres three quarters of the largest circle apart: neighbours overlap, yet each centre
+    // stays clear of the circles beside it (whose radius is at most half the largest).
+    let big = (w / (0.75 * (n - 1) as f32 + 1.0)).min(h * 0.42);
+    let step = big * 0.75;
+    let x0 = (w - step * (n - 1) as f32) / 2.0;
+    let centre = |k: usize| x0 + step * k as f32;
+    let lw = if n > 1 { step * 0.96 } else { w * 0.96 };
+    let cy = ((h - big - h * 0.34) / 2.0).max(h * 0.03) + big / 2.0;
+    let ty = cy + big / 2.0 + h * 0.04;
+    let away = |k: usize| if mid > 0.0 { (k as f32 - mid).abs() / mid } else { 0.0 };
+    let mut out = Vec::new();
+    if n > 1 {
+        let mut line = Sh::line(centre(0), cy, centre(n - 1), cy, spec.colors.accent(0));
+        line.line_w = 2.0;
+        out.push(line);
+    }
+    // The outer circles first, so the middle ones lie on top.
+    let mut order: Vec<usize> = (0..tops.len()).collect();
+    order.sort_by(|a, b| away(*b).total_cmp(&away(*a)));
+    for k in order {
+        let Some(&i) = tops.get(k) else { continue };
+        let t = away(k);
+        let a = spec.colors.accent(k);
+        let p = if spec.colors == SmartArtColors::Colorful || n <= 1 {
+            Paint::Accent(a, None)
+        } else {
+            Paint::Accent(a, Some(100_000 - (55_000.0 * t).round().clamp(0.0, 55_000.0) as u32).filter(|v| *v < 100_000))
+        };
+        let d = big * (1.0 - 0.25 * t);
+        let cx = centre(k);
+        let b = [cx - d / 2.0, cy - d / 2.0, d, d];
+        let mut c = with_text(plain("ellipse", b, p), (k + 1).to_string(), "ctr", ink_on(p), 1.0).of_item(i).text_box(inset(b, ROUND_INSET));
+        c.line = Paint::Light;
+        c.line_w = 2.0;
+        out.push(c);
+    }
+    for (k, &i) in tops.iter().enumerate() {
+        let x = (centre(k) - lw / 2.0).clamp(0.0, (w - lw).max(0.0));
+        out.push(label(spec, i, [x, ty, lw, (h * 0.98 - ty).max(0.0)], "ctr", "t"));
+    }
+    out
+}
+
+/// Numbered circles high and low in turn, joined by slanted strokes with a small dot halfway;
+/// each item's text under its circle.
+fn timeline_zigzag(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let d = (cw * 0.5).min(h * 0.22);
+    let hi = h * 0.04 + d / 2.0;
+    let lo = if n > 1 { hi + d * 0.9 } else { hi };
+    let cx = |k: usize| cw * (k as f32 + 0.5);
+    let cy = |k: usize| if k.is_multiple_of(2) { hi } else { lo };
+    let mut out = Vec::new();
+    for k in 1..tops.len() {
+        let mut s = Sh::line(cx(k - 1), cy(k - 1), cx(k), cy(k), spec.colors.accent(k - 1));
+        s.line_w = 1.5;
+        out.push(s);
+        let dot = d * 0.22;
+        let (mx, my) = ((cx(k - 1) + cx(k)) / 2.0, (cy(k - 1) + cy(k)) / 2.0);
+        out.push(plain("ellipse", [mx - dot / 2.0, my - dot / 2.0, dot, dot], graded(spec, k - 1, n)));
+    }
+    for (k, &i) in tops.iter().enumerate() {
+        let p = graded(spec, k, n);
+        let b = [cx(k) - d / 2.0, cy(k) - d / 2.0, d, d];
+        let mut c = with_text(plain("ellipse", b, p), (k + 1).to_string(), "ctr", ink_on(p), 1.0).of_item(i).text_box(inset(b, ROUND_INSET));
+        c.line = Paint::Light;
+        c.line_w = 2.0;
+        out.push(c);
+    }
+    for (k, &i) in tops.iter().enumerate() {
+        let ty = cy(k) + d / 2.0 + h * 0.04;
+        out.push(label(spec, i, [cx(k) - cw * 0.47, ty, cw * 0.94, (h * 0.98 - ty).max(0.0)], "ctr", "t"));
+    }
+    out
+}
+
+/// Small dots on a thin line near the top; under each dot the item's text, left-aligned from
+/// the dot: its own line in the item's colour, the lines under it below.
+fn timeline_line(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let d = (cw * 0.09).min(h * 0.07);
+    // The dots and about half the height of text, centred top to bottom.
+    let ly = ((h - d - h * 0.5) / 2.0).max(h * 0.04) + d / 2.0;
+    let title_h = h * 0.16;
+    let mut line = Sh::line(0.0, ly, w, ly, spec.colors.accent(0));
+    line.line_w = 1.5;
+    let mut out = vec![line];
+    for (k, &i) in tops.iter().enumerate() {
+        let x0 = cw * k as f32 + cw * 0.04;
+        let tw = cw * 0.9;
+        out.push(plain("ellipse", [x0, ly - d / 2.0, d, d], graded(spec, k, n)).of_item(i));
+        let ty = ly + d / 2.0 + h * 0.06;
+        let tb = [x0, ty, tw, title_h];
+        let own = spec.items.get(i).map(|it| it.text.clone()).unwrap_or_default();
+        let mut title = with_text(plain("rect", tb, Paint::None), own, "l", Ink::Accent(spec.colors.accent(k)), 1.15).of_item(i).text_box(tb);
+        title.anchor = "t";
+        out.push(title);
+        let body = lines_of(spec, i, false, true);
+        if !body.is_empty() {
+            let by = ty + title_h;
+            let b = [x0, by, tw, (h * 0.98 - by).max(0.0)];
+            let mut s = plain("rect", b, Paint::None).of_item(i).text_box(b);
+            s.text = body;
+            s.algn = Some("l");
+            s.anchor = "t";
+            out.push(s);
+        }
+    }
+    out
+}
+
+/// Tinted columns: the item's text and the lines under it on top; the last of those lines set
+/// apart under a rule, large and in the item's colour (a figure, a short phrase).
+fn card_emphasis(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let (y0, ch) = (h * 0.03, h * 0.94);
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let (x0, card_w) = (cw * k as f32 + cw * 0.04, cw * 0.92);
+        let (tx, tw) = (x0 + card_w * 0.08, card_w * 0.84);
+        let mut lines = lines_of(spec, i, true, true);
+        let last = if lines.len() > 1 { lines.pop() } else { None };
+        let mut card = plain("rect", [x0, y0, card_w, ch], graded_light(spec, k, n, 18_000, 8_000));
+        card.text = lines;
+        card.item = Some(i);
+        card.tb = [tx, y0 + ch * 0.06, tw, if last.is_some() { ch * 0.54 } else { ch * 0.88 }];
+        card.algn = Some("l");
+        card.anchor = "t";
+        out.push(card);
+        if let Some((text, _)) = last {
+            let a = spec.colors.accent(k);
+            let ry = y0 + ch * 0.64;
+            let mut rule = Sh::line(tx, ry, tx + tw, ry, a);
+            rule.line_w = 1.0;
+            out.push(rule);
+            let b = [tx, ry + ch * 0.04, tw, (y0 + ch * 0.96 - ry - ch * 0.04).max(0.0)];
+            out.push(with_text(plain("rect", b, Paint::None), text, "l", Ink::Accent(a), 1.6).of_item(i).text_box(b));
+        }
+    }
+    out
+}
+
+/// Rows of text with a small square in the item's colour at each row's right end and a thin rule
+/// between rows.
+fn card_marker_rows(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let rh = h / n as f32;
+    let s = (rh * 0.3).min(w * 0.06);
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let y = rh * k as f32;
+        let pad = w * 0.02;
+        out.push(label(spec, i, [pad, y, (w - s - pad * 4.0).max(0.0), rh], "l", "ctr"));
+        out.push(plain("rect", [w - s - pad, y + (rh - s) / 2.0, s, s], graded(spec, k, n)).of_item(i));
+        if k + 1 < n {
+            let mut rule = Sh::line(pad, y + rh, w - pad, y + rh, spec.colors.accent(k));
+            rule.line_w = 0.75;
+            out.push(rule);
+        }
+    }
+    out
+}
+
+/// Tinted squares, each with a large number in the item's colour over the item's text.
+fn card_squares(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let side = (cw * 0.92).min(h * 0.94);
+    let y0 = (h - side) / 2.0;
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let x0 = cw * k as f32 + (cw - side) / 2.0;
+        let (tx, tw) = (x0 + side * 0.1, side * 0.8);
+        let mut card = plain("rect", [x0, y0, side, side], graded_light(spec, k, n, 30_000, 12_000));
+        card.text = lines_of(spec, i, true, true);
+        card.item = Some(i);
+        card.tb = [tx, y0 + side * 0.42, tw, side * 0.5];
+        card.algn = Some("l");
+        card.anchor = "t";
+        out.push(card);
+        let nb = [tx, y0 + side * 0.06, tw, side * 0.32];
+        let num = with_text(plain("rect", nb, Paint::None), (k + 1).to_string(), "l", Ink::Accent(spec.colors.accent(k)), 2.0);
+        let mut num = num.of_item(i).text_box(nb);
+        num.anchor = "b";
+        out.push(num);
+    }
+    out
+}
+
 // ---- colours that read ----
 
 /// Least WCAG contrast of a graphic's text against what is behind it (normal-size text, AA).
@@ -1533,8 +1788,16 @@ pub fn layout_xml(l: SmartArtLayout) -> String {
         | SmartArtLayout::CardNumbered
         | SmartArtLayout::CardBigNumbers
         | SmartArtLayout::CardHeader
-        | SmartArtLayout::CardTall => ("lin", &[("linDir", "fromL"), ("nodeVertAlign", "t")]),
-        SmartArtLayout::TimelineVertical | SmartArtLayout::TeamCards | SmartArtLayout::CardRows => ("lin", &[("linDir", "fromT")]),
+        | SmartArtLayout::CardTall
+        | SmartArtLayout::TimelineStems
+        | SmartArtLayout::TimelineCircles
+        | SmartArtLayout::TimelineZigzag
+        | SmartArtLayout::TimelineLine
+        | SmartArtLayout::CardEmphasis
+        | SmartArtLayout::CardSquares => ("lin", &[("linDir", "fromL"), ("nodeVertAlign", "t")]),
+        SmartArtLayout::TimelineVertical | SmartArtLayout::TeamCards | SmartArtLayout::CardRows | SmartArtLayout::CardMarkerRows => {
+            ("lin", &[("linDir", "fromT")])
+        }
     };
     let shape = match l {
         SmartArtLayout::BasicList
@@ -1542,7 +1805,10 @@ pub fn layout_xml(l: SmartArtLayout) -> String {
         | SmartArtLayout::CardBigNumbers
         | SmartArtLayout::CardHeader
         | SmartArtLayout::CardRows
-        | SmartArtLayout::TimelineVertical => "rect",
+        | SmartArtLayout::TimelineVertical
+        | SmartArtLayout::CardEmphasis
+        | SmartArtLayout::CardMarkerRows
+        | SmartArtLayout::CardSquares => "rect",
         SmartArtLayout::Process
         | SmartArtLayout::Hierarchy
         | SmartArtLayout::Matrix
@@ -1555,7 +1821,11 @@ pub fn layout_xml(l: SmartArtLayout) -> String {
         | SmartArtLayout::TimelineDots
         | SmartArtLayout::TimelineNumbered
         | SmartArtLayout::TimelineArrow
-        | SmartArtLayout::TeamCircles => "ellipse",
+        | SmartArtLayout::TeamCircles
+        | SmartArtLayout::TimelineStems
+        | SmartArtLayout::TimelineCircles
+        | SmartArtLayout::TimelineZigzag
+        | SmartArtLayout::TimelineLine => "ellipse",
         SmartArtLayout::Pyramid => "trapezoid",
     };
     layout_node(&mut w, LayoutNode { name: "diagram", style: None, alg, params, shape: None, pres_of: &[] }, |w| match l {

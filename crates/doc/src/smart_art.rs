@@ -64,10 +64,24 @@ pub enum SmartArtLayout {
     CardTall,
     /// Rows, each with a numbered square and the item's text beside it.
     CardRows,
+    /// Stems up and down from a horizontal line in turn, each item's text at its stem's end.
+    TimelineStems,
+    /// Overlapping numbered circles on a line, larger and stronger towards the middle.
+    TimelineCircles,
+    /// Numbered circles in a zigzag joined by slanted strokes with a small dot on each.
+    TimelineZigzag,
+    /// Small dots on a thin line near the top, each item's text under its dot.
+    TimelineLine,
+    /// Columns of text whose last line is large and in the item's colour.
+    CardEmphasis,
+    /// Rows of text, each with a small square marker at its right end.
+    CardMarkerRows,
+    /// Tinted squares, each with a large number and the item's text inside.
+    CardSquares,
 }
 
 impl SmartArtLayout {
-    pub const ALL: [SmartArtLayout; 20] = [
+    pub const ALL: [SmartArtLayout; 27] = [
         SmartArtLayout::BasicList,
         SmartArtLayout::Process,
         SmartArtLayout::Cycle,
@@ -88,6 +102,13 @@ impl SmartArtLayout {
         SmartArtLayout::CardHeader,
         SmartArtLayout::CardTall,
         SmartArtLayout::CardRows,
+        SmartArtLayout::TimelineStems,
+        SmartArtLayout::TimelineCircles,
+        SmartArtLayout::TimelineZigzag,
+        SmartArtLayout::TimelineLine,
+        SmartArtLayout::CardEmphasis,
+        SmartArtLayout::CardMarkerRows,
+        SmartArtLayout::CardSquares,
     ];
 
     /// The id commands use (`basicList`, `process`…).
@@ -113,6 +134,13 @@ impl SmartArtLayout {
             SmartArtLayout::CardHeader => "cardHeader",
             SmartArtLayout::CardTall => "cardTall",
             SmartArtLayout::CardRows => "cardRows",
+            SmartArtLayout::TimelineStems => "timelineStems",
+            SmartArtLayout::TimelineCircles => "timelineCircles",
+            SmartArtLayout::TimelineZigzag => "timelineZigzag",
+            SmartArtLayout::TimelineLine => "timelineLine",
+            SmartArtLayout::CardEmphasis => "cardEmphasis",
+            SmartArtLayout::CardMarkerRows => "cardMarkerRows",
+            SmartArtLayout::CardSquares => "cardSquares",
         }
     }
 
@@ -149,6 +177,13 @@ impl SmartArtLayout {
             SmartArtLayout::CardHeader => "Header Cards",
             SmartArtLayout::CardTall => "Tall Cards",
             SmartArtLayout::CardRows => "Numbered Rows",
+            SmartArtLayout::TimelineStems => "Stem Timeline",
+            SmartArtLayout::TimelineCircles => "Overlapping Circles Timeline",
+            SmartArtLayout::TimelineZigzag => "Zigzag Timeline",
+            SmartArtLayout::TimelineLine => "Line Timeline",
+            SmartArtLayout::CardEmphasis => "Emphasis Columns",
+            SmartArtLayout::CardMarkerRows => "Marker Rows",
+            SmartArtLayout::CardSquares => "Numbered Squares",
         }
     }
 
@@ -162,15 +197,23 @@ impl SmartArtLayout {
             SmartArtLayout::Pyramid => "Pyramid",
             SmartArtLayout::Radial | SmartArtLayout::Venn => "Relationship",
             SmartArtLayout::Matrix => "Matrix",
-            SmartArtLayout::TimelineDots | SmartArtLayout::TimelineNumbered | SmartArtLayout::TimelineArrow | SmartArtLayout::TimelineVertical => {
-                "Timeline"
-            }
+            SmartArtLayout::TimelineDots
+            | SmartArtLayout::TimelineNumbered
+            | SmartArtLayout::TimelineArrow
+            | SmartArtLayout::TimelineVertical
+            | SmartArtLayout::TimelineStems
+            | SmartArtLayout::TimelineCircles
+            | SmartArtLayout::TimelineZigzag
+            | SmartArtLayout::TimelineLine => "Timeline",
             SmartArtLayout::TeamCircles | SmartArtLayout::TeamCards | SmartArtLayout::TeamPills => "Meet the Team",
             SmartArtLayout::CardNumbered
             | SmartArtLayout::CardBigNumbers
             | SmartArtLayout::CardHeader
             | SmartArtLayout::CardTall
-            | SmartArtLayout::CardRows => "Text Cards",
+            | SmartArtLayout::CardRows
+            | SmartArtLayout::CardEmphasis
+            | SmartArtLayout::CardMarkerRows
+            | SmartArtLayout::CardSquares => "Text Cards",
         }
     }
 
@@ -197,6 +240,13 @@ impl SmartArtLayout {
             SmartArtLayout::CardHeader => "Shows a few ideas as cards with a coloured heading.",
             SmartArtLayout::CardTall => "Shows a few ideas as tall tinted cards, numbered.",
             SmartArtLayout::CardRows => "Shows ideas as numbered rows of text.",
+            SmartArtLayout::TimelineStems => "Shows events as stems off a line, the text at the stem ends above and below in turn.",
+            SmartArtLayout::TimelineCircles => "Shows stages as overlapping numbered circles, the middle ones largest.",
+            SmartArtLayout::TimelineZigzag => "Shows steps as numbered circles in a zigzag, joined by slanted strokes.",
+            SmartArtLayout::TimelineLine => "Shows events as small dots on a thin line, the text under each dot.",
+            SmartArtLayout::CardEmphasis => "Shows a few ideas as columns, each ending in a large figure or phrase.",
+            SmartArtLayout::CardMarkerRows => "Shows ideas as rows of text with a square marker at the right.",
+            SmartArtLayout::CardSquares => "Shows a few ideas as tinted numbered squares.",
         }
     }
 }
@@ -319,7 +369,14 @@ impl SmartArtSpec {
             SmartArtLayout::Pyramid | SmartArtLayout::Venn => ["People", "Process", "Tools"].map(|t| SmartArtItem::new(t, 0)).to_vec(),
             SmartArtLayout::Matrix => ["Strengths", "Weaknesses", "Chances", "Risks"].map(|t| SmartArtItem::new(t, 0)).to_vec(),
             SmartArtLayout::BasicList => ["Ideas", "Notes", "Drafts", "Edits", "Final"].map(|t| SmartArtItem::new(t, 0)).to_vec(),
-            SmartArtLayout::TimelineDots | SmartArtLayout::TimelineNumbered | SmartArtLayout::TimelineArrow | SmartArtLayout::TimelineVertical => {
+            SmartArtLayout::TimelineDots
+            | SmartArtLayout::TimelineNumbered
+            | SmartArtLayout::TimelineArrow
+            | SmartArtLayout::TimelineVertical
+            | SmartArtLayout::TimelineStems
+            | SmartArtLayout::TimelineCircles
+            | SmartArtLayout::TimelineZigzag
+            | SmartArtLayout::TimelineLine => {
                 with_lines(&[("Kickoff", "Goals agreed"), ("Design", "First sketches"), ("Build", "Working draft"), ("Launch", "Out to everyone")])
             }
             SmartArtLayout::TeamCircles | SmartArtLayout::TeamCards | SmartArtLayout::TeamPills => {
@@ -329,7 +386,15 @@ impl SmartArtSpec {
             | SmartArtLayout::CardBigNumbers
             | SmartArtLayout::CardHeader
             | SmartArtLayout::CardTall
-            | SmartArtLayout::CardRows => with_lines(&[("Idea", "Why it matters"), ("Plan", "How we get there"), ("Result", "What changes")]),
+            | SmartArtLayout::CardRows
+            | SmartArtLayout::CardMarkerRows
+            | SmartArtLayout::CardSquares => with_lines(&[("Idea", "Why it matters"), ("Plan", "How we get there"), ("Result", "What changes")]),
+            SmartArtLayout::CardEmphasis => {
+                [("Reach", "People who saw it", "12k"), ("Growth", "Since last year", "+24%"), ("Rating", "Average score", "4.8")]
+                    .iter()
+                    .flat_map(|(a, b, c)| [SmartArtItem::new(*a, 0), SmartArtItem::new(*b, 1), SmartArtItem::new(*c, 1)])
+                    .collect()
+            }
         };
         SmartArtSpec { layout, items, colors: SmartArtColors::default() }
     }
@@ -424,6 +489,8 @@ mod tests {
         assert_eq!(SmartArtLayout::from_id("basic_cycle"), Some(SmartArtLayout::Cycle));
         assert_eq!(SmartArtLayout::from_id("list"), Some(SmartArtLayout::BasicList));
         assert_eq!(SmartArtLayout::from_id("timeline-dots"), Some(SmartArtLayout::TimelineDots));
+        assert_eq!(SmartArtLayout::from_id("timeline-stems"), Some(SmartArtLayout::TimelineStems));
+        assert_eq!(SmartArtLayout::from_id("Numbered Squares"), Some(SmartArtLayout::CardSquares));
         assert_eq!(SmartArtLayout::from_id("Team Cards"), Some(SmartArtLayout::TeamCards));
         for l in SmartArtLayout::ALL {
             assert_eq!(SmartArtLayout::from_id(l.id()), Some(l));
