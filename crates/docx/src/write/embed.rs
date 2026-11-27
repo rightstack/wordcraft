@@ -51,6 +51,8 @@ pub(crate) struct EmbedWriter<'d> {
     scrubbed: HashMap<String, Vec<u8>>,
     /// A chart past the chart limits has been written (and the loss logged, once per save).
     chart_cut: bool,
+    /// The document's theme colours (a SmartArt drawing's text is coloured to read in them).
+    pub theme: &'d [wordcraft_doc::props::Rgb],
 }
 
 impl<'d> EmbedWriter<'d> {
@@ -98,6 +100,7 @@ impl<'d> EmbedWriter<'d> {
             drop_glossary: false,
             scrubbed: HashMap::new(),
             chart_cut: false,
+            theme: &doc.settings.theme_colors,
         }
     }
 
@@ -422,7 +425,7 @@ impl super::Writer<'_> {
             (layout, sa::layout_xml(spec.layout), sa::LAYOUT_CT, rt::DIAGRAM_LAYOUT),
             (style, sa::quick_style_xml(), sa::STYLE_CT, rt::DIAGRAM_QUICK_STYLE),
             (colors, sa::colors_xml(spec.colors), sa::COLORS_CT, rt::DIAGRAM_COLORS),
-            (drawing, sa::drawing_xml(spec, w, h), sa::DRAWING_CT, rt::DIAGRAM_DRAWING),
+            (drawing, sa::drawing_xml(spec, self.embeds.theme, w, h), sa::DRAWING_CT, rt::DIAGRAM_DRAWING),
         ];
         let mut ids = Vec::new();
         for (name, xml, ct, kind) in parts {

@@ -15,6 +15,7 @@
 //! [`spec_of`] turns a data part back into the model only when writing that model again gives
 //! the same markup: a diagram another program made or changed stays read-only.
 
+use wordcraft_doc::THEME_COLORS;
 use wordcraft_doc::graphic::GraphicItem;
 use wordcraft_doc::props::Rgb;
 use wordcraft_doc::smart_art::{MAX_ITEMS, SmartArtColors, SmartArtItem, SmartArtLayout, SmartArtSpec};
@@ -102,6 +103,9 @@ enum Paint {
     Accent(usize, Option<u32>),
     /// The theme's light background colour.
     Light,
+    /// Theme accent `n` (1–6) darkened to `lum` (thousandths of a percent of its luminance kept),
+    /// where the plain accent wouldn't stand out from what is behind it (see [`fit_colours`]).
+    Shade(usize, u32),
 }
 
 /// The colour of a shape's text.
@@ -113,14 +117,22 @@ enum Ink {
     Dark,
     /// Theme accent `n` (1–6).
     Accent(usize),
+    /// Theme accent `n` darkened to `lum` (see [`Paint::Shade`]).
+    Shade(usize, u32),
+    /// The theme's dark text colour darker still (`lum` of its luminance kept), on mid-tone
+    /// fills where neither it nor the light colour reads well enough.
+    Darker(u32),
 }
 
 impl Ink {
-    fn scheme(self) -> String {
+    /// The theme colour name and the luminance modulation (`a:lumMod`) to write, if any.
+    fn scheme(self) -> (String, Option<u32>) {
         match self {
-            Ink::Light => "lt1".into(),
-            Ink::Dark => "tx1".into(),
-            Ink::Accent(n) => format!("accent{}", n.clamp(1, 6)),
+            Ink::Light => ("lt1".into(), None),
+            Ink::Dark => ("tx1".into(), None),
+            Ink::Accent(n) => (format!("accent{}", n.clamp(1, 6)), None),
+            Ink::Shade(n, lum) => (format!("accent{}", n.clamp(1, 6)), Some(lum)),
+            Ink::Darker(lum) => ("tx1".into(), Some(lum)),
         }
     }
 }
@@ -609,7 +621,7 @@ fn graded_light(spec: &SmartArtSpec, k: usize, n: usize, most: u32, least: u32) 
 fn ink_on(p: Paint) -> Ink {
     match p {
         Paint::Accent(_, Some(t)) if t < 90_000 => Ink::Dark,
-        Paint::Accent(..) => Ink::Light,
+        Paint::Accent(..) | Paint::Shade(..) => Ink::Light,
         Paint::Light | Paint::None => Ink::Dark,
     }
 }
@@ -953,6 +965,131 @@ fn card_rows(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
     out
 }
 
+// ---- colours that read ----
+
+/// Least WCAG contrast of a graphic's text against what is behind it (normal-size text, AA).
+const TEXT_CONTRAST: f64 = 4.5;
+/// Least WCAG contrast of an accent line against what is behind it (graphical objects, AA).
+const LINE_CONTRAST: f64 = 3.0;
+
+/// Theme colour `i` (0 dk1, 1 lt1, 2 dk2, 3 lt2, 4..9 accent1..6) of `theme`, else of the default theme.
+fn theme_slot(theme: &[Rgb], i: usize) -> Rgb {
+    theme.get(i).or_else(|| THEME_COLORS.get(i)).copied().unwrap_or(Rgb::BLACK)
+}
+
+fn accent_rgb(theme: &[Rgb], n: usize) -> Rgb {
+    theme_slot(theme, 3 + n.clamp(1, 6))
+}
+
+/// `p` in the colours of `theme`, as the drawing reader resolves it; `None` for no fill.
+fn paint_rgb(p: Paint, theme: &[Rgb]) -> Option<Rgb> {
+    Some(match p {
+        Paint::None => return None,
+        Paint::Light => theme_slot(theme, 1),
+        Paint::Accent(n, None) => accent_rgb(theme, n),
+        Paint::Accent(n, Some(t)) => accent_rgb(theme, n).modified("tint", f64::from(t.min(100_000)) / 100_000.0),
+        Paint::Shade(n, lum) => accent_rgb(theme, n).modified("lumMod", f64::from(lum.min(100_000)) / 100_000.0),
+    })
+}
+
+fn ink_rgb(i: Ink, theme: &[Rgb]) -> Rgb {
+    match i {
+        Ink::Light => theme_slot(theme, 1),
+        Ink::Dark => theme_slot(theme, 0),
+        Ink::Accent(n) => accent_rgb(theme, n),
+        Ink::Shade(n, lum) => paint_rgb(Paint::Shade(n, lum), theme).unwrap_or(Rgb::BLACK),
+        Ink::Darker(lum) => theme_slot(theme, 0).modified("lumMod", f64::from(lum.min(100_000)) / 100_000.0),
+    }
+}
+
+/// WCAG relative luminance of an sRGB colour.
+fn luminance(c: Rgb) -> f64 {
+    let ch = |v: u8| {
+        let s = f64::from(v) / 255.0;
+        if s <= 0.039_28 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * ch(c.0) + 0.7152 * ch(c.1) + 0.0722 * ch(c.2)
+}
+
+/// WCAG contrast ratio of two colours (1–21).
+fn contrast(a: Rgb, b: Rgb) -> f64 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// What shape `k` of `shapes` is seen against: its own fill, else the fill of the topmost shape
+/// drawn before it whose box holds the middle of its text box (lines: of its box), else the page.
+fn backdrop(shapes: &[Sh], k: usize, theme: &[Rgb]) -> Rgb {
+    let Some(sh) = shapes.get(k) else { return Rgb::WHITE };
+    if let Some(c) = paint_rgb(sh.fill, theme) {
+        return c;
+    }
+    let r = if sh.text.is_empty() { sh.b } else { sh.tb };
+    let (cx, cy) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+    shapes
+        .get(..k)
+        .unwrap_or_default()
+        .iter()
+        .rev()
+        .filter(|s| s.prst != "line" && s.b[0] <= cx && cx <= s.b[0] + s.b[2] && s.b[1] <= cy && cy <= s.b[1] + s.b[3])
+        .find_map(|s| paint_rgb(s.fill, theme))
+        .unwrap_or(Rgb::WHITE)
+}
+
+/// Accent `n` darkened just enough (in steps of 5% luminance) to reach `least` contrast against
+/// the light `bg`; `None` when `bg` is dark or no step gets there.
+fn darker(n: usize, bg: Rgb, theme: &[Rgb], least: f64) -> Option<u32> {
+    if contrast(bg, Rgb::BLACK) < contrast(bg, Rgb::WHITE) {
+        return None;
+    }
+    (2..=18u32).rev().map(|s| s * 5_000).find(|&lum| contrast(ink_rgb(Ink::Shade(n, lum), theme), bg) >= least)
+}
+
+/// The theme's dark text or light colour, whichever stands out more from `bg`; the dark one
+/// darkened (in steps of 10%) when that is still short of [`TEXT_CONTRAST`] on a mid-tone `bg`.
+fn plain_ink(bg: Rgb, theme: &[Rgb]) -> Ink {
+    let dark = contrast(ink_rgb(Ink::Dark, theme), bg);
+    if dark < contrast(ink_rgb(Ink::Light, theme), bg) {
+        return Ink::Light;
+    }
+    if dark >= TEXT_CONTRAST {
+        return Ink::Dark;
+    }
+    (0..=9u32).rev().map(|s| s * 10_000).find(|&lum| contrast(ink_rgb(Ink::Darker(lum), theme), bg) >= TEXT_CONTRAST).map_or(Ink::Dark, Ink::Darker)
+}
+
+/// Text and accent lines of laid-out `shapes` in colours that read in `theme`: the layouts name
+/// theme colours (a light theme's accent can be pale yellow), so the real colours decide. Plain
+/// text takes the theme's dark or light colour, whichever contrasts more with what is behind it;
+/// accent text and lines keep their accent while it contrasts enough ([`TEXT_CONTRAST`],
+/// [`LINE_CONTRAST`]), else a darker shade of it, else (text) the plain colour.
+fn fit_colours(shapes: &mut [Sh], theme: &[Rgb]) {
+    for k in 0..shapes.len() {
+        let bg = backdrop(shapes, k, theme);
+        let Some(sh) = shapes.get_mut(k) else { continue };
+        if !sh.text.is_empty() {
+            sh.ink = match sh.ink {
+                Ink::Light | Ink::Dark | Ink::Darker(_) => plain_ink(bg, theme),
+                Ink::Accent(n) | Ink::Shade(n, _) if contrast(accent_rgb(theme, n), bg) >= TEXT_CONTRAST => Ink::Accent(n),
+                Ink::Accent(n) | Ink::Shade(n, _) => {
+                    darker(n, bg, theme, TEXT_CONTRAST).map_or_else(|| plain_ink(bg, theme), |lum| Ink::Shade(n, lum))
+                }
+            };
+        }
+        if sh.fill == Paint::None
+            && sh.line_w > 0.0
+            && let Paint::Accent(n, _) = sh.line
+            && paint_rgb(sh.line, theme).is_some_and(|c| contrast(c, bg) < LINE_CONTRAST)
+        {
+            sh.line = if contrast(accent_rgb(theme, n), bg) >= LINE_CONTRAST {
+                Paint::Accent(n, None)
+            } else {
+                darker(n, bg, theme, LINE_CONTRAST).map_or(sh.line, |lum| Paint::Shade(n, lum))
+            };
+        }
+    }
+}
+
 // ---- text ----
 
 /// Whether `paras` fit a `w` × `h` text box at `size` points (sub-items at [`CHILD`] of it).
@@ -1018,12 +1155,31 @@ fn paint(w: &mut W, p: Paint, alpha: Option<u32>) {
             }
             w.close("a:solidFill");
         }
+        Paint::Shade(n, lum) => {
+            w.open("a:solidFill", &[]);
+            scheme_clr(w, &format!("accent{}", n.clamp(1, 6)), Some(lum));
+            w.close("a:solidFill");
+        }
     }
 }
 
-/// The `dsp:drawing` of `spec` laid out `w` × `h` points: its shapes, back to front.
-pub fn drawing_xml(spec: &SmartArtSpec, w: f32, h: f32) -> String {
-    let shapes = layout(spec, w, h);
+/// `a:schemeClr` of theme colour `val`, with its luminance modulated to `lum` when set.
+fn scheme_clr(w: &mut W, val: &str, lum: Option<u32>) {
+    match lum {
+        None => w.empty("a:schemeClr", &[("val", val)]),
+        Some(l) => {
+            w.open("a:schemeClr", &[("val", val)]);
+            w.empty("a:lumMod", &[("val", &l.to_string())]);
+            w.close("a:schemeClr");
+        }
+    }
+}
+
+/// The `dsp:drawing` of `spec` laid out `w` × `h` points in the colours of `theme` (text and
+/// lines are coloured to read on what is behind them in that theme): its shapes, back to front.
+pub fn drawing_xml(spec: &SmartArtSpec, theme: &[Rgb], w: f32, h: f32) -> String {
+    let mut shapes = layout(spec, w, h);
+    fit_colours(&mut shapes, theme);
     let size = text_size(&shapes);
     let mut x = W::new();
     x.open("dsp:drawing", &[("xmlns:dgm", NS_DGM), ("xmlns:dsp", NS_DSP), ("xmlns:a", NS_A)]);
@@ -1082,7 +1238,7 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
         x.close("a:ln");
     }
     x.close("dsp:spPr");
-    let text_clr = sh.ink.scheme();
+    let (text_clr, text_lum) = sh.ink.scheme();
     let text_clr = text_clr.as_str();
     let size = size * if sh.scale.is_finite() { sh.scale.clamp(0.1, 10.0) } else { 1.0 };
     x.open("dsp:style", &[]);
@@ -1092,7 +1248,7 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
         x.close(name);
     }
     x.open("a:fontRef", &[("idx", "minor")]);
-    x.empty("a:schemeClr", &[("val", text_clr)]);
+    scheme_clr(x, text_clr, text_lum);
     x.close("a:fontRef");
     x.close("dsp:style");
     if !sh.text.is_empty() {
@@ -1129,7 +1285,7 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
                 x.open("a:r", &[]);
                 x.open("a:rPr", &[("lang", "en-US"), ("sz", &((s * 100.0).round() as i64).to_string())]);
                 x.open("a:solidFill", &[]);
-                x.empty("a:schemeClr", &[("val", text_clr)]);
+                scheme_clr(x, text_clr, text_lum);
                 x.close("a:solidFill");
                 x.close("a:rPr");
                 x.leaf("a:t", &[], t);
@@ -1149,7 +1305,7 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, size: f32) {
 /// What `spec` draws as, `w` × `h` points, in the colours of `theme`: its drawing part, read the
 /// way SmartArt drawings from files are.
 pub fn smart_art_items(spec: &SmartArtSpec, theme: &[Rgb], w: f32, h: f32) -> Vec<GraphicItem> {
-    match xml::parse(drawing_xml(spec, w, h).as_bytes()) {
+    match xml::parse(drawing_xml(spec, theme, w, h).as_bytes()) {
         Ok(d) => crate::read::diagram::diagram_items(&d, theme, w, h, &mut |_| None),
         Err(_) => Vec::new(),
     }
@@ -1636,7 +1792,7 @@ fn same(a: &El, b: &El, depth: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wordcraft_doc::THEME_COLORS;
+    use wordcraft_doc::graphic::PathSeg;
 
     fn parse(s: &str) -> El {
         xml::parse(s.as_bytes()).unwrap()
@@ -1720,6 +1876,130 @@ mod tests {
         }
     }
 
+    /// A light theme whose first accent is a pale yellow (white text on it reads 1.5:1), and a
+    /// theme of mid-strength accents.
+    const YELLOW_THEME: [Rgb; 12] = [
+        Rgb(0x17, 0x13, 0x1A),
+        Rgb(0xFF, 0xFF, 0xFF),
+        Rgb(0x3A, 0x32, 0x3D),
+        Rgb(0xFD, 0xF4, 0xEA),
+        Rgb(0xFF, 0xD0, 0x2F),
+        Rgb(0x5A, 0xA5, 0xFF),
+        Rgb(0xF9, 0x7A, 0x3A),
+        Rgb(0x62, 0xD2, 0x73),
+        Rgb(0x8E, 0x63, 0xE8),
+        Rgb(0xFF, 0xA8, 0xCC),
+        Rgb(0x00, 0x62, 0xD8),
+        Rgb(0x8E, 0x21, 0xFA),
+    ];
+    const BLUE_THEME: [Rgb; 12] = [
+        Rgb(0, 0, 0),
+        Rgb(0xFF, 0xFF, 0xFF),
+        Rgb(0x44, 0x54, 0x6A),
+        Rgb(0xE7, 0xE6, 0xE6),
+        Rgb(0x44, 0x72, 0xC4),
+        Rgb(0xED, 0x7D, 0x31),
+        Rgb(0xA5, 0xA5, 0xA5),
+        Rgb(0xFF, 0xC0, 0x00),
+        Rgb(0x5B, 0x9B, 0xD5),
+        Rgb(0x70, 0xAD, 0x47),
+        Rgb(0x05, 0x63, 0xC1),
+        Rgb(0x95, 0x4F, 0x72),
+    ];
+
+    /// The box of a drawn shape or path, and its fill.
+    fn filled_box(it: &GraphicItem) -> Option<([f32; 4], Rgb)> {
+        match it {
+            GraphicItem::Shape { rect, fill: Some(f), .. } => Some((*rect, *f)),
+            GraphicItem::Path { segs, fill: Some(f), .. } => {
+                let pts: Vec<(f32, f32)> = segs
+                    .iter()
+                    .filter_map(|s| match *s {
+                        PathSeg::Move(x, y) | PathSeg::Line(x, y) | PathSeg::Cubic(_, _, _, _, x, y) => Some((x, y)),
+                        PathSeg::Close => None,
+                    })
+                    .collect();
+                let (x0, y0) = pts.iter().fold((f32::MAX, f32::MAX), |(a, b), p| (a.min(p.0), b.min(p.1)));
+                let (x1, y1) = pts.iter().fold((f32::MIN, f32::MIN), |(a, b), p| (a.max(p.0), b.max(p.1)));
+                Some(([x0, y0, x1 - x0, y1 - y0], *f))
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn every_layouts_text_reads_on_what_is_behind_it_in_any_theme() {
+        // Drawn as the app draws it: each text line against the topmost filled shape drawn before
+        // it under the line's middle, else the white page.
+        for theme in [&YELLOW_THEME[..], &BLUE_THEME[..], &THEME_COLORS[..]] {
+            for layout in SmartArtLayout::ALL {
+                for colors in SmartArtColors::ALL {
+                    for n in [3usize, 6] {
+                        let mut spec = SmartArtSpec::sample(layout);
+                        spec.colors = colors;
+                        spec.items = (0..n).flat_map(|k| [SmartArtItem::new(format!("Item {k}"), 0), SmartArtItem::new("line", 1)]).collect();
+                        let spec = spec.sanitized();
+                        let items = smart_art_items(&spec, theme, 432.0, 252.0);
+                        for (k, it) in items.iter().enumerate() {
+                            let GraphicItem::Text { rect, color, text, .. } = it else { continue };
+                            let (cx, cy) = (rect[0] + rect[2] / 2.0, rect[1] + rect[3] / 2.0);
+                            let bg = items[..k]
+                                .iter()
+                                .rev()
+                                .filter_map(filled_box)
+                                .find(|(b, _)| b[0] <= cx && cx <= b[0] + b[2] && b[1] <= cy && cy <= b[1] + b[3])
+                                .map_or(Rgb::WHITE, |(_, f)| f);
+                            let c = contrast(*color, bg);
+                            assert!(
+                                c >= TEXT_CONTRAST,
+                                "{layout:?} {colors:?} n={n} theme accent1 {:?}: {text:?} {color:?} on {bg:?} = {c:.2}",
+                                theme[4]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn accent_lines_stand_out_from_the_page() {
+        for theme in [&YELLOW_THEME[..], &BLUE_THEME[..]] {
+            for layout in SmartArtLayout::ALL {
+                for colors in SmartArtColors::ALL {
+                    let mut spec = SmartArtSpec::sample(layout);
+                    spec.colors = colors;
+                    let mut shapes = super::layout(&spec.sanitized(), 432.0, 252.0);
+                    fit_colours(&mut shapes, theme);
+                    for (k, sh) in shapes.iter().enumerate() {
+                        if sh.prst == "line" && sh.line != Paint::None {
+                            let c = paint_rgb(sh.line, theme).unwrap();
+                            let bg = backdrop(&shapes, k, theme);
+                            assert!(contrast(c, bg) >= LINE_CONTRAST, "{layout:?} {colors:?}: {:?} {c:?} on {bg:?}", sh.line);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_pale_accent_gets_dark_text_and_a_strong_one_light_text_in_the_saved_drawing() {
+        let spec = SmartArtSpec { colors: SmartArtColors::Accent1, ..SmartArtSpec::sample(SmartArtLayout::Process) }.sanitized();
+        // The first step is the full accent: dark text on pale yellow, light text on mid blue.
+        let first_run = |theme: &[Rgb]| {
+            let d = parse(&drawing_xml(&spec, theme, 400.0, 200.0));
+            let sp = d.child("dsp:spTree").unwrap().children("dsp:sp").find(|sp| sp.find("a:t").is_some()).unwrap();
+            sp.find("a:rPr").unwrap().find("a:schemeClr").unwrap().attr("val").unwrap().to_string()
+        };
+        assert_eq!(first_run(&YELLOW_THEME), "tx1");
+        assert_eq!(first_run(&BLUE_THEME), "lt1");
+        // Accent numbers on white in a pale accent are written darker (lumMod).
+        let spec = SmartArtSpec { colors: SmartArtColors::Accent1, ..SmartArtSpec::sample(SmartArtLayout::CardBigNumbers) }.sanitized();
+        let x = drawing_xml(&spec, &YELLOW_THEME, 400.0, 200.0);
+        assert!(x.contains("<a:lumMod val="), "{x}");
+    }
+
     #[test]
     fn sub_items_of_a_list_are_bullets_without_their_own_node() {
         let mut spec = SmartArtSpec::sample(SmartArtLayout::BasicList);
@@ -1755,7 +2035,7 @@ mod tests {
         // Each item's connection names its parent: Design (item 1) under Lead (item 0).
         let cx = data.child("dgm:cxnLst").unwrap().els().nth(1).unwrap();
         assert_eq!(cx.attr("srcId"), Some(model_id(1).as_str()));
-        let drawing = parse(&drawing_xml(&spec, 300.0, 200.0));
+        let drawing = parse(&drawing_xml(&spec, &THEME_COLORS, 300.0, 200.0));
         let tree = drawing.child("dsp:spTree").unwrap();
         assert_eq!(names(tree).first(), Some(&"dsp:nvGrpSpPr"));
         let sp = tree.children("dsp:sp").last().unwrap();
