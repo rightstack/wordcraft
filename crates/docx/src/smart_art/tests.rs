@@ -67,7 +67,7 @@ fn every_shape_box_stays_in_the_frame_and_text_on_light_fills_is_dark() {
             let spec = spec.sanitized();
             for (w, h) in [(432.0, 252.0), (120.0, 300.0), (600.0, 80.0)] {
                 for sh in super::layout(&spec, w, h) {
-                    let [x, y, bw, bh] = sh.b;
+                    let [x, y, bw, bh] = sh.drawn.unwrap_or(sh.b);
                     if !(x >= -0.5 && y >= -0.5 && x + bw <= w + 0.5 && y + bh <= h + 0.5) {
                         bad.push(format!("{layout:?} {n} {w}x{h}: {:?} {:?}", sh.prst, sh.b));
                     }
@@ -421,21 +421,103 @@ fn a_labeled_hierarchy_names_its_bands_with_the_later_childless_top_items() {
     assert!(super::layout(&spec, 432.0, 252.0).iter().filter(|s| s.prst == "rect").all(|s| s.item.is_none()));
 }
 
+/// The points of the drawn paths of `spec` laid out `w` × `h`, with each path's fill.
+fn paths(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<(Vec<(f32, f32)>, Option<Rgb>)> {
+    smart_art_items(spec, &THEME_COLORS, w, h)
+        .into_iter()
+        .filter_map(|it| match it {
+            GraphicItem::Path { segs, fill, .. } => Some((
+                segs.iter()
+                    .filter_map(|s| match *s {
+                        PathSeg::Move(x, y) | PathSeg::Line(x, y) | PathSeg::Cubic(_, _, _, _, x, y) => Some((x, y)),
+                        PathSeg::Close => None,
+                    })
+                    .collect(),
+                fill,
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
-fn right_pointing_arrows_are_left_arrows_turned_half_round() {
-    // The drawing reader draws `rightArrow` in fixed proportions, so its shaft would not hold the text.
-    for layout in SmartArtLayout::ALL.into_iter().skip(73) {
-        let spec = SmartArtSpec::sample(layout).sanitized();
-        assert!(super::layout(&spec, 432.0, 252.0).iter().all(|s| s.prst != "rightArrow"), "{layout:?}");
-    }
+fn arrows_point_their_own_way_and_the_reader_follows_their_shaft_and_head() {
     let spec = SmartArtSpec::sample(SmartArtLayout::ArrowsConverging).sanitized();
-    let arrows: Vec<(f32, f32)> = super::layout(&spec, 432.0, 252.0).iter().filter(|s| s.prst == "leftArrow").map(|s| (s.b[0], s.rot)).collect();
+    let arrows: Vec<&'static str> = super::layout(&spec, 432.0, 252.0).iter().filter(|s| s.prst.ends_with("Arrow")).map(|s| s.prst).collect();
     // Skills on the left points right (in), Needs on the right points left (in).
-    assert_eq!(arrows.len(), 2);
-    assert!(arrows[0].0 < arrows[1].0 && arrows[0].1 == 180.0 && arrows[1].1 == 0.0, "{arrows:?}");
+    assert_eq!(arrows, ["rightArrow", "leftArrow"]);
     let spec = SmartArtSpec { layout: SmartArtLayout::ArrowsDiverging, ..spec };
-    let rots: Vec<f32> = super::layout(&spec, 432.0, 252.0).iter().filter(|s| s.prst == "leftArrow").map(|s| s.rot).collect();
-    assert_eq!(rots, [0.0, 180.0]);
+    let arrows: Vec<&'static str> = super::layout(&spec, 432.0, 252.0).iter().filter(|s| s.prst.ends_with("Arrow")).map(|s| s.prst).collect();
+    assert_eq!(arrows, ["leftArrow", "rightArrow"]);
+    // No arrow is a turned-round left arrow any more (its text would be turned in Word).
+    for layout in SmartArtLayout::ALL {
+        let spec = SmartArtSpec::sample(layout).sanitized();
+        assert!(super::layout(&spec, 432.0, 252.0).iter().all(|s| !(s.prst == "leftArrow" && s.rot == 180.0)), "{layout:?}");
+    }
+    // The continuous block process: its band is a right arrow whose shaft is 70% of its height
+    // and whose head is 40% of its height long, as the gallery shows (not the reader's default).
+    let spec = SmartArtSpec::sample(SmartArtLayout::ProcessContinuous).sanitized();
+    let band = super::layout(&spec, 432.0, 252.0).into_iter().next().unwrap();
+    assert_eq!(band.prst, "rightArrow");
+    let (pts, _) = paths(&spec, 432.0, 252.0).into_iter().next().expect("the band is drawn as its outline");
+    let ys: Vec<f32> = pts.iter().filter(|p| p.0 < 1.0).map(|p| p.1).collect();
+    let shaft = ys.iter().fold(f32::MIN, |a, &b| a.max(b)) - ys.iter().fold(f32::MAX, |a, &b| a.min(b));
+    assert!((shaft / band.b[3] - 0.7).abs() < 0.02, "shaft {shaft} of {}", band.b[3]);
+    let neck = pts.iter().filter(|p| (p.1 - band.b[1]).abs() < 0.5).map(|p| p.0).fold(f32::MAX, f32::min);
+    assert!(((band.b[2] - neck) / band.b[3] - 0.4).abs() < 0.02, "head from {neck}");
+}
+
+#[test]
+fn pills_are_drawn_with_round_ends() {
+    // A team pill is a `roundRect` with its full radius (adj 50000): the reader draws it from its
+    // outline, so its top is a half circle (the middle of the top edge only touches the box).
+    let spec = SmartArtSpec::sample(SmartArtLayout::TeamPills).sanitized();
+    let pill = super::layout(&spec, 432.0, 252.0).into_iter().find(|s| s.prst == "roundRect").unwrap();
+    assert_eq!(pill.adj, [("adj", 50_000)]);
+    let (pts, _) = paths(&spec, 432.0, 252.0).into_iter().next().expect("the pill is drawn as its outline");
+    let [x, y, w, _] = pill.b;
+    let r = w / 2.0;
+    for (px, py) in pts.iter().filter(|p| p.1 < y + r - 0.5) {
+        let d = ((px - (x + r)).powi(2) + (py - (y + r)).powi(2)).sqrt();
+        assert!((d - r).abs() < 0.5, "({px}, {py}) on the round top, {d} from its centre");
+    }
+}
+
+#[test]
+fn the_target_list_is_a_quarter_target_in_the_lower_left_corner() {
+    for n in 1..=6 {
+        let spec = tops_spec(SmartArtLayout::ListTarget, n);
+        let shapes = super::layout(&spec, 432.0, 252.0);
+        let pies: Vec<&Sh> = shapes.iter().filter(|s| s.prst == "pie").collect();
+        assert_eq!(pies.len(), n, "{n}");
+        let corner = (pies[0].b[0] + pies[0].b[2] / 2.0, pies[0].b[1] + pies[0].b[3] / 2.0);
+        for (k, p) in pies.iter().enumerate() {
+            // Upper right quarter of a circle centred on the same corner, smaller each time.
+            assert_eq!(p.adj, [("adj1", 16_200_000), ("adj2", 0)]);
+            assert!(((p.b[0] + p.b[2] / 2.0) - corner.0).abs() < 0.01 && ((p.b[1] + p.b[3] / 2.0) - corner.1).abs() < 0.01);
+            assert!(corner.0 < 432.0 * 0.05 && corner.1 > 252.0 * 0.95, "{corner:?}");
+            if k > 0 {
+                assert!(p.b[2] < pies[k - 1].b[2]);
+            }
+            let d = p.drawn.unwrap();
+            let want = [corner.0, corner.1 - p.b[2] / 2.0, p.b[2] / 2.0, p.b[2] / 2.0];
+            assert!(d.iter().zip(want).all(|(a, b)| (a - b).abs() < 0.01), "{d:?} {want:?}");
+        }
+        // A line from each ring to its text, the texts to the right of the target.
+        assert_eq!(shapes.iter().filter(|s| s.prst == "line").count(), n);
+        let right = pies[0].b[0] + pies[0].b[2];
+        assert!(shapes.iter().filter(|s| !s.text.is_empty()).all(|s| s.tb[0] >= right), "{n}");
+    }
+    // The drawn wedges stay in the frame.
+    let spec = tops_spec(SmartArtLayout::ListTarget, 4);
+    // …and the drawing is not shrunk for the circles' boxes reaching past it: the outer wedge
+    // is drawn where the layout put it.
+    let top = paths(&spec, 432.0, 252.0).first().map(|(pts, _)| pts.iter().map(|p| p.1).fold(f32::MAX, f32::min)).unwrap();
+    let want = super::layout(&spec, 432.0, 252.0).iter().find_map(|s| s.drawn).unwrap()[1];
+    assert!((top - want).abs() < 0.5, "{top} {want}");
+    for (pts, _) in paths(&spec, 432.0, 252.0) {
+        assert!(pts.iter().all(|p| p.0 >= -0.5 && p.1 >= -0.5 && p.0 <= 432.5 && p.1 <= 252.5), "{pts:?}");
+    }
 }
 
 #[test]

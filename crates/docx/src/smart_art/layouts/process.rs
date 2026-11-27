@@ -513,8 +513,7 @@ pub(crate) fn process_increasing_arrows(spec: &SmartArtSpec, w: f32, h: f32) -> 
         let x = cw * k as f32;
         let y = area / n as f32 * k as f32;
         let b = [x, y, (w - x).max(0.0), ah];
-        // A left arrow turned half round (see `arrow`).
-        let mut a = card("leftArrow", b, graded(spec, k, n), spec, i).turned(180.0);
+        let mut a = card("rightArrow", b, graded(spec, k, n), spec, i);
         a.text = lines_of(spec, i, true, false);
         a.adj = vec![("adj1", 80_000), ("adj2", 50_000)];
         let head = ah.min(b[2]) * 0.5;

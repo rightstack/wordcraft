@@ -328,8 +328,7 @@ fn shaft_box(b: [f32; 4], right: bool) -> [f32; 4] {
 
 /// An arrow (`rightArrow` or `leftArrow`) in `b` holding item `i`'s text.
 fn text_arrow(spec: &SmartArtSpec, i: usize, b: [f32; 4], right: bool, fill: Paint) -> Sh {
-    // A right arrow is a left arrow turned half round (see `arrow`).
-    let mut a = card("leftArrow", b, fill, spec, i).turned(if right { 180.0 } else { 0.0 });
+    let mut a = card(if right { "rightArrow" } else { "leftArrow" }, b, fill, spec, i);
     a.adj = vec![("adj1", 76_000), ("adj2", 50_000)];
     a.tb = shaft_box(b, right);
     a

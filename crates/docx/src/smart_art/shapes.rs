@@ -76,6 +76,9 @@ pub(crate) struct Sh {
     pub(crate) item: Option<usize>,
     /// The box to pick the item by when not the shape's own (a wedge's or ring's box holds its neighbours too).
     pub(crate) pick: Option<[f32; 4]>,
+    /// The part of the box the shape draws in, when only that part has to lie in the frame (a
+    /// quarter of a pie centred on the frame's corner); `None`: the whole box.
+    pub(crate) drawn: Option<[f32; 4]>,
 }
 
 impl Sh {
@@ -99,6 +102,7 @@ impl Sh {
             scale: 1.0,
             item: None,
             pick: None,
+            drawn: None,
         }
     }
 
@@ -123,6 +127,7 @@ impl Sh {
             scale: 1.0,
             item: None,
             pick: None,
+            drawn: None,
         }
     }
 
@@ -451,15 +456,12 @@ pub(crate) fn line_box(b: [f32; 4], text: String, child: bool, algn: &'static st
 }
 
 /// A block arrow (`rightArrow`, `leftArrow`, `upArrow`, `downArrow`) in `b`, `shaft` and `head`
-/// in thousandths of a percent (the preset's `adj1`, `adj2`). A right arrow is written as a left
-/// arrow turned half round: the drawing reader draws `rightArrow` in fixed proportions, so its
-/// shaft and head would not follow `adj` (the box, and so the text box, is the same either way).
-/// Turn it further with [`Sh::turned_by`].
+/// in thousandths of a percent (the preset's `adj1`, `adj2`; the drawing reader draws any preset
+/// with adjust values from its outline, so they hold). Turn it with [`Sh::turned_by`].
 pub(crate) fn arrow(prst: &'static str, b: [f32; 4], paint: Paint, shaft: i64, head: i64) -> Sh {
-    let right = prst == "rightArrow";
-    let mut a = plain(if right { "leftArrow" } else { prst }, b, paint);
+    let mut a = plain(prst, b, paint);
     a.adj = vec![("adj1", shaft), ("adj2", head)];
-    if right { a.turned(180.0) } else { a }
+    a
 }
 
 impl Sh {

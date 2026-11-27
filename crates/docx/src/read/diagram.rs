@@ -110,8 +110,8 @@ pub(crate) fn diagram_items(drawing: &El, theme: &[Rgb], w: f32, h: f32, image: 
         .collect();
     // The drawing's extent (from its origin) against the frame. One scale for both axes, never
     // above 1:1: Word draws the drawing at its own size when it fits the frame.
-    let (ext_x, ext_y) = placed.iter().fold((0.0f64, 0.0f64), |(mx, my), (xf, _, b)| {
-        let r = xf.rect(*b);
+    let (ext_x, ext_y) = placed.iter().fold((0.0f64, 0.0f64), |(mx, my), (xf, sp, b)| {
+        let r = xf.rect(painted(sp, *b));
         (mx.max(r[2]), my.max(r[3]))
     });
     let frame = |f: f32| if f.is_finite() && f > 0.0 { f as f64 * EMU_PT } else { 0.0 };
@@ -126,6 +126,28 @@ pub(crate) fn diagram_items(drawing: &El, theme: &[Rgb], w: f32, h: f32, image: 
         shape(sp, root.then(xf), b, theme, fit as f32, image, &mut out);
     }
     out
+}
+
+/// The part of a shape's box `b` that it paints: an unturned slice of a circle (`pie`,
+/// `blockArc`) paints only round its arc (a quarter target's circle is centred on the frame's
+/// corner, its box reaching past the frame); any other shape its whole box.
+fn painted(sp: &El, b: [f64; 4]) -> [f64; 4] {
+    let sppr = sp.child("dsp:spPr");
+    let geom = sppr.and_then(|p| p.child("a:prstGeom"));
+    let prst = geom.and_then(|g| g.attr("prst")).unwrap_or("rect");
+    let turned = sppr
+        .and_then(|p| p.child("a:xfrm"))
+        .is_some_and(|x| x.attr("rot").and_then(int).unwrap_or(0) != 0 || x.attr("flipH").is_some_and(on) || x.attr("flipV").is_some_and(on));
+    if turned || !(prst == "pie" || prst == "blockArc") || !(b[2] > 0.0 && b[3] > 0.0) {
+        return b;
+    }
+    let (pts, _) = sector(prst == "blockArc", b[2], b[3], geom);
+    let (x0, y0, x1, y1) =
+        pts.iter().fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |(a, c, d, e), p| (a.min(p.0), c.min(p.1), d.max(p.0), e.max(p.1)));
+    if x1 < x0 || y1 < y0 {
+        return b;
+    }
+    [b[0] + x0, b[1] + y0, x1 - x0, y1 - y0]
 }
 
 /// One `dsp:sp`: its picture or outline, then its text.
@@ -156,8 +178,12 @@ fn shape(sp: &El, xf: Xf, b: [f64; 4], theme: &[Rgb], fit: f32, image: &mut dyn 
         let (stroke, stroke_width) = line_of(sp, sppr, theme);
         let prst = sppr.and_then(|p| p.child("a:prstGeom")).and_then(|g| g.attr("prst")).unwrap_or("rect");
         let geom = sppr.and_then(|p| p.child("a:prstGeom"));
+        // The preset's own kind draws its default proportions: a turned shape, or one whose
+        // adjust values differ (a pill's full corner radius, an arrow's shaft and head), is drawn
+        // as its outline instead (an ellipse has no adjust values).
+        let adjusted = geom.and_then(|g| g.child("a:avLst")).is_some_and(|l| l.children("a:gd").next().is_some());
         let geo = match kind_of(prst) {
-            Some(k) if !turned || prst == "ellipse" => Geo::Kind(k),
+            Some(k) if prst == "ellipse" || !(turned || adjusted) => Geo::Kind(k),
             _ => match outline(prst, w, h, geom) {
                 Some((pts, closed)) => Geo::Poly(pts, closed),
                 None => Geo::Kind(kind_of(prst).unwrap_or(ShapeKind::Rectangle)),
@@ -382,12 +408,13 @@ fn arrow(len: f64, thick: f64, a1: f64, a2: f64, double: bool) -> Vec<(f64, f64)
     }
 }
 
-/// A `w` × `h` rectangle with corners of radius `r`, each corner in six steps.
+/// A `w` × `h` rectangle with corners of radius `r`, each corner in twelve steps (a pill's
+/// half-circle ends stay round).
 fn rounded(w: f64, h: f64, r: f64) -> Vec<(f64, f64)> {
-    let mut pts = Vec::with_capacity(28);
+    let mut pts = Vec::with_capacity(52);
     for (cx, cy, start) in [(w - r, r, -90.0), (w - r, h - r, 0.0), (r, h - r, 90.0), (r, r, 180.0)] {
-        for k in 0..=6 {
-            let t = (start + 15.0 * k as f64).to_radians();
+        for k in 0..=12 {
+            let t = (start + 7.5 * k as f64).to_radians();
             pts.push((cx + r * t.cos(), cy + r * t.sin()));
         }
     }

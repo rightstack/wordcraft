@@ -180,29 +180,28 @@ pub(crate) fn list_table(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
 
 // ---- fourth batch ----
 
-/// A zigzag of hexagons: each top item's own line in a filled hexagon on the upper row, the lines
-/// under it in a light hexagon fitted beside it on the lower row.
+/// Two rows of hexagons: each top item's own line in a filled hexagon on the upper row, the lines
+/// under it in a light hexagon below it, half a step to the right.
 pub(crate) fn list_hexagon_alternating(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
     let tops = tops(spec);
     let n = tops.len().max(1);
-    let m = 2 * n;
-    let hw = (w * 0.98 / (0.75 * (m - 1) as f32 + 1.0)).min(h * 0.98 / (1.5 * 0.87));
+    // Two rows, as the gallery shows: the items' filled hexagons along the top, each one's light
+    // hexagon of lines below it, half a step to the right.
+    let hw = (w * 0.98 / (n as f32 + 0.5)).min(h * 0.98 / 1.9 / 0.87);
     let hh = hw * 0.87;
-    let (x0, y0) = ((w - (0.75 * (m - 1) as f32 + 1.0) * hw) / 2.0, (h - 1.5 * hh) / 2.0);
+    let (x0, y0) = ((w - (n as f32 + 0.5) * hw) / 2.0, (h - 1.9 * hh) / 2.0);
     let gap = hw * 0.03;
-    let cell = |c: usize| {
-        let (x, y) = (x0 + 0.75 * hw * c as f32, y0 + if c % 2 == 1 { hh / 2.0 } else { 0.0 });
-        [x + gap, y + gap, hw - 2.0 * gap, hh - 2.0 * gap]
-    };
-    let text_box = |b: [f32; 4]| [b[0] + b[2] * 0.2, b[1] + b[3] * 0.12, b[2] * 0.6, b[3] * 0.76];
+    let cell = |x: f32, y: f32| [x + gap, y + gap, hw - 2.0 * gap, hh - 2.0 * gap];
+    let text_box = |b: [f32; 4]| [b[0] + b[2] * 0.14, b[1] + b[3] * 0.12, b[2] * 0.72, b[3] * 0.76];
     let mut out = Vec::new();
     for (k, &i) in tops.iter().enumerate() {
-        let b = cell(2 * k);
+        let x = x0 + hw * k as f32;
+        let b = cell(x, y0);
         let mut s = tag("hexagon", b, graded(spec, k, n), spec, i);
         s.adj = vec![("adj", hex_adj(b))];
         s.tb = text_box(b);
         out.push(s);
-        let d = cell(2 * k + 1);
+        let d = cell(x + hw / 2.0, y0 + hh * 0.9);
         let mut t = plain("hexagon", d, graded_light(spec, k, n, 26_000, 16_000)).of_item(i);
         t.adj = vec![("adj", hex_adj(d))];
         t.text = lines_of(spec, i, false, true);
@@ -367,35 +366,45 @@ pub(crate) fn list_vertical_arrow(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh
     rows_with_details(spec, w, h, true)
 }
 
-/// Squares nested in the lower left corner, the first outermost; each top item's text in a row to
-/// the right, under a line that runs from the top of its square.
+/// A quarter target in the lower left corner: nested quarter discs (`pie`s centred on the corner,
+/// the first outermost, drawn biggest first so each shows as a ring); each top item's text in a
+/// row to the right, a line from the middle of its ring to its row.
 pub(crate) fn list_target(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
     let tops = tops(spec);
     let n = tops.len().max(1);
-    let big = (h * 0.98).min(w * 0.38);
+    let (cx, cy) = (w * 0.01, h * 0.99);
+    let big = (h * 0.98).min(w * 0.5);
     let step = big / n as f32;
-    let side = |k: usize| big - step * k as f32;
+    let radius = |k: usize| big - step * k as f32;
     let one = spec.colors != wordcraft_doc::smart_art::SmartArtColors::Colorful;
     let mut out = Vec::new();
     for (k, &i) in tops.iter().enumerate() {
-        let s = side(k);
+        let r = radius(k);
         let keep = if n > 1 { 22_000 + 50_000 * k as u32 / (n - 1) as u32 } else { 50_000 };
         let p = Paint::Accent(spec.colors.accent(if one { 0 } else { k }), Some(keep));
-        let band = [w * 0.01, h - s, s, if k + 1 == tops.len() { s } else { step }];
-        let mut q = plain("rect", [w * 0.01, h - s, s, s], p).of_item(i).picked_by(band);
+        // The circle's box is centred on the corner; only its upper right quarter is drawn.
+        let mut q = plain("pie", [cx - r, cy - r, 2.0 * r, 2.0 * r], p).of_item(i);
+        q.adj = vec![("adj1", 16_200_000), ("adj2", 0)];
+        q.drawn = Some([cx, cy - r, r, r]);
         q.line = Paint::Light;
         q.line_w = 1.0;
-        out.push(q);
+        // Picked by the ring's band where it meets the upright edge (a little way in).
+        out.push(q.picked_by([cx, cy - r, r * 0.3, step]));
     }
-    let tx = w * 0.01 + big + w * 0.03;
+    let tx = cx + big + w * 0.04;
+    let row = big / n as f32;
+    let top = cy - big;
     for (k, &i) in tops.iter().enumerate() {
-        let y = h - side(k);
         let a = spec.colors.accent(k);
-        let mut l = Sh::line(w * 0.01 + side(k), y, w * 0.99, y, a);
+        // The middle of the ring's band at 45°.
+        let rm = radius(k) - step / 2.0;
+        let (px, py) = (cx + rm * std::f32::consts::FRAC_1_SQRT_2, cy - rm * std::f32::consts::FRAC_1_SQRT_2);
+        let ry = top + row * (k as f32 + 0.5);
+        let mut l = Sh::line(px, py, tx - w * 0.01, ry, a);
         l.line = Paint::Accent(a, None);
-        l.line_w = 1.0;
+        l.line_w = 0.75;
         out.push(l);
-        out.push(label(spec, i, [tx, y, (w * 0.99 - tx).max(0.0), step.min(h - y)], "l", "ctr"));
+        out.push(label(spec, i, [tx, top + row * k as f32, (w * 0.99 - tx).max(0.0), row], "l", "ctr"));
     }
     out
 }
