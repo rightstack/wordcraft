@@ -3,17 +3,17 @@
 use wordcraft_doc::smart_art::SmartArtSpec;
 
 use super::matrix::{spokes, wedge_edge};
-use crate::smart_art::shapes::{Paint, ROUND_INSET, Sh, angle, card, graded, inset, label, lines_of, plain, polar, tag, tint, tops};
+use crate::smart_art::shapes::{Paint, ROUND_INSET, Sh, angle, card, graded, hex_adj, inset, label, lines_of, plain, polar, tag, tint, tops};
 
 /// A preset angle (`adj1`, `adj2` of `pie` and `blockArc`): degrees clockwise from three o'clock
 /// in 60000ths.
-fn ang(deg: f32) -> i64 {
+pub(crate) fn ang(deg: f32) -> i64 {
     (deg.rem_euclid(360.0) * 60_000.0).round() as i64
 }
 
 /// A band along an ellipse from `from` to `to` degrees (clockwise), `band` thick, centred on the
 /// ellipse with radii `rx`, `ry` round (`cx`, `cy`), with an arrowhead at its end.
-fn arc_arrow((cx, cy): (f32, f32), (rx, ry): (f32, f32), band: f32, from: f32, to: f32, paint: Paint) -> Vec<Sh> {
+pub(crate) fn arc_arrow((cx, cy): (f32, f32), (rx, ry): (f32, f32), band: f32, from: f32, to: f32, paint: Paint) -> Vec<Sh> {
     let b = [cx - rx - band / 2.0, cy - ry - band / 2.0, 2.0 * rx + band, 2.0 * ry + band];
     let mut arc = plain("blockArc", b, paint);
     let ss = b[2].min(b[3]).max(0.01);
@@ -29,12 +29,22 @@ fn arc_arrow((cx, cy): (f32, f32), (rx, ry): (f32, f32), band: f32, from: f32, t
 
 /// Each item's text round a circle, a curved arrow from each to the next.
 pub(crate) fn cycle_text(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    ring_with_arcs(spec, w, h, false)
+}
+
+/// Filled blocks round a circle, a curved arrow from each to the next.
+pub(crate) fn cycle_block(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    ring_with_arcs(spec, w, h, true)
+}
+
+/// Each item's text (in a filled block when `blocks`) round a circle, curved arrows between.
+fn ring_with_arcs(spec: &SmartArtSpec, w: f32, h: f32, blocks: bool) -> Vec<Sh> {
     let tops = tops(spec);
     let n = tops.len().max(1);
     let m = w.min(h);
     let (cx, cy) = (w / 2.0, h / 2.0);
-    let lw = if n == 1 { m * 0.6 } else { (m * 0.3).min(m * 0.9 * (std::f32::consts::PI / n as f32).sin()) };
-    let lh = lw * 0.5;
+    let lw = if n == 1 { m * 0.6 } else { (m * if blocks { 0.36 } else { 0.3 }).min(m * 0.9 * (std::f32::consts::PI / n as f32).sin()) };
+    let lh = lw * if blocks { 0.56 } else { 0.5 };
     // The labels' middles on an ellipse that keeps them in the frame.
     let (rx, ry) = (((w - lw) / 2.0 * 0.96).max(0.0), ((h - lh) / 2.0 * 0.96).max(0.0));
     let at = |deg: f32| {
@@ -45,7 +55,14 @@ pub(crate) fn cycle_text(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
     // Text first: nothing drawn behind it, and the arcs keep clear of it.
     for (k, &i) in tops.iter().enumerate() {
         let (x, y) = if n == 1 { (cx, cy) } else { at(angle(k, n)) };
-        out.push(label(spec, i, [x - lw / 2.0, y - lh / 2.0, lw, lh], "ctr", "ctr"));
+        let b = [x - lw / 2.0, y - lh / 2.0, lw, lh];
+        if blocks {
+            let mut s = card("roundRect", b, graded(spec, k, n), spec, i);
+            s.adj = vec![("adj", 14_000)];
+            out.push(s);
+        } else {
+            out.push(label(spec, i, b, "ctr", "ctr"));
+        }
     }
     if n > 1 {
         let band = (m * 0.03).max(0.5);
@@ -92,6 +109,16 @@ pub(crate) fn cycle_continuous(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
 
 /// A ring cut into a segment per item holding its text, a light circle in the middle.
 pub(crate) fn cycle_segmented(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    wedges(spec, w, h, true)
+}
+
+/// A circle cut into a wedge per item holding its text.
+pub(crate) fn cycle_pie(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    wedges(spec, w, h, false)
+}
+
+/// A circle cut into a wedge per item, with a light hole in the middle when `hole`.
+fn wedges(spec: &SmartArtSpec, w: f32, h: f32, hole: bool) -> Vec<Sh> {
     let tops = tops(spec);
     let n = tops.len().max(1);
     let d = w.min(h) * 0.96;
@@ -102,8 +129,19 @@ pub(crate) fn cycle_segmented(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
     for (k, &i) in tops.iter().enumerate() {
         let from = -90.0 + step * k as f32;
         let mid = from + step / 2.0;
-        let (tx, ty) = polar(cx, cy, d * 0.36, if n == 1 { -90.0 } else { mid });
-        let s = (d * 0.24).min(d * 0.5 * (step.min(180.0) / 2.0).to_radians().sin());
+        let r = if n == 1 && !hole {
+            0.0
+        } else if hole {
+            d * 0.36
+        } else {
+            d * 0.27
+        };
+        let (tx, ty) = polar(cx, cy, r, if n == 1 { -90.0 } else { mid });
+        let s = if n == 1 && !hole {
+            d * 0.6
+        } else {
+            (d * if hole { 0.24 } else { 0.3 }).min(d * if hole { 0.5 } else { 0.4 } * (step.min(180.0) / 2.0).to_radians().sin())
+        };
         let tb = [tx - s / 2.0, ty - s / 2.0, s, s];
         let mut seg = card(if n == 1 { "ellipse" } else { "pie" }, circle, graded(spec, k, n), spec, i).picked_by(tb);
         if n > 1 {
@@ -114,8 +152,77 @@ pub(crate) fn cycle_segmented(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
         seg.line_w = 2.5;
         out.push(seg);
     }
-    let hole = d * 0.4;
-    out.push(plain("ellipse", [cx - hole / 2.0, cy - hole / 2.0, hole, hole], Paint::Light));
+    if hole {
+        let hd = d * 0.4;
+        out.push(plain("ellipse", [cx - hd / 2.0, cy - hd / 2.0, hd, hd], Paint::Light));
+    }
+    out
+}
+
+/// Filled circles on a ring line (no arrows), each item's text inside its circle.
+pub(crate) fn cycle_nondirectional(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let m = w.min(h);
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let d = if n == 1 { m * 0.6 } else { (m * 0.34).min(m * 0.9 * (std::f32::consts::PI / n as f32).sin()) };
+    let (rx, ry) = (((w - d) / 2.0 * 0.96).max(0.0), ((h - d) / 2.0 * 0.96).max(0.0));
+    let mut out = Vec::new();
+    if n > 1 {
+        let mut ring = plain("ellipse", [cx - rx, cy - ry, 2.0 * rx, 2.0 * ry], Paint::None);
+        ring.line = Paint::Accent(spec.colors.accent(0), Some(60_000));
+        ring.line_w = (m * 0.012).clamp(1.0, 4.0);
+        out.push(ring);
+    }
+    for (k, &i) in tops.iter().enumerate() {
+        let (x, y) = if n == 1 {
+            (cx, cy)
+        } else {
+            let a = angle(k, n).to_radians();
+            (cx + rx * a.cos(), cy + ry * a.sin())
+        };
+        let b = [x - d / 2.0, y - d / 2.0, d, d];
+        let mut s = card("ellipse", b, graded(spec, k, n), spec, i);
+        s.tb = inset(b, ROUND_INSET);
+        s.line = Paint::Light;
+        s.line_w = 2.0;
+        out.push(s);
+    }
+    out
+}
+
+/// The first item in a large hexagon in the middle, the items under it in hexagons round it.
+pub(crate) fn cycle_hexagon_radial(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let around = spokes(spec);
+    let n = around.len();
+    let m = w.min(h);
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let hex = |b: [f32; 4], fill: Paint, i: usize| {
+        let mut s = card("hexagon", b, fill, spec, i);
+        s.text = lines_of(spec, i, true, n == 0 || i != 0);
+        s.adj = vec![("adj", hex_adj(b))];
+        s.tb = [b[0] + b[2] * 0.2, b[1] + b[3] * 0.12, b[2] * 0.6, b[3] * 0.76];
+        s.line = Paint::Light;
+        s.line_w = 2.0;
+        s
+    };
+    let mut out = Vec::new();
+    // Hexagons as wide as `s`, 0.87 of that high.
+    let step = if n <= 1 { 1.0 } else { (std::f32::consts::PI / n as f32).sin() };
+    let mut hs = m * 0.34;
+    let (mut rx, mut ry) = (0.0, 0.0);
+    for _ in 0..4 {
+        rx = ((w - hs) / 2.0).max(0.0).min(m * 0.36);
+        ry = ((h - hs * 0.87) / 2.0).max(0.0).min(m * 0.36);
+        hs = (m * 0.34).min(2.0 * rx.min(ry) * step * 0.95).max(m * 0.08);
+    }
+    let hc = if n == 0 { m * 0.6 } else { (hs * 1.25).min(2.0 * (rx.min(ry) - hs * 0.45)).max(hs * 0.6) };
+    out.push(hex([cx - hc / 2.0, cy - hc * 0.435, hc, hc * 0.87], graded(spec, 0, 1), 0));
+    for (k, &i) in around.iter().enumerate() {
+        let a = angle(k, n).to_radians();
+        let (x, y) = (cx + rx * a.cos(), cy + ry * a.sin());
+        out.push(hex([x - hs / 2.0, y - hs * 0.435, hs, hs * 0.87], graded(spec, k + 1, n + 1), i));
+    }
     out
 }
 

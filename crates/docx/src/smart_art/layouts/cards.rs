@@ -2,7 +2,9 @@
 
 use wordcraft_doc::smart_art::{SmartArtColors, SmartArtSpec};
 
-use crate::smart_art::shapes::{Ink, Paint, ROUND_INSET, Sh, avatar, graded, graded_light, ink_on, inset, label, lines_of, plain, tops, with_text};
+use crate::smart_art::shapes::{
+    Ink, Paint, ROUND_INSET, Sh, avatar, graded, graded_light, ink_on, inset, label, line_box, lines_of, plain, tag, tint, tops, with_text,
+};
 
 /// Dots on a line across the middle; each item's text above its dot, then below, in turn,
 /// joined to it by a short stem.
@@ -527,6 +529,72 @@ pub(crate) fn card_squares(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
         let mut num = num.of_item(i).text_box(nb);
         num.anchor = "b";
         out.push(num);
+    }
+    out
+}
+
+// ---- fourth batch ----
+
+/// A line across with a large circle per top item (its own line inside) and a small circle for
+/// each item under it; a small circle's text under it. Every item is a shape of its own.
+pub(crate) fn timeline_circle_accent(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let n = spec.items.len().max(1);
+    let weight = |i: usize| if spec.items.get(i).is_some_and(|it| it.level == 0) { 1.7f32 } else { 1.0 };
+    let total: f32 = (0..spec.items.len()).map(weight).sum::<f32>().max(1.0);
+    let unit = w / total;
+    let big = (unit * 1.7 * 0.94).min(h * 0.5);
+    let small = (unit * 0.5).min(big * 0.4);
+    // The line a little above the middle: room under it for the small circles' text.
+    let ly = (h * 0.38).max(big / 2.0 + h * 0.01);
+    let mut centres = Vec::with_capacity(n);
+    let mut at = 0.0f32;
+    for i in 0..spec.items.len() {
+        let wi = weight(i);
+        centres.push(at + wi * unit / 2.0);
+        at += wi * unit;
+    }
+    let mut out = Vec::new();
+    if let (Some(&a), Some(&b)) = (centres.first(), centres.last())
+        && b - a > 0.5
+    {
+        let mut l = Sh::line(a, ly, b, ly, spec.colors.accent(0));
+        l.line_w = 2.0;
+        out.push(l);
+    }
+    let mut top = 0usize;
+    let tops_n = tops(spec).len().max(1);
+    let mut accent_k = 0usize;
+    for (i, it) in spec.items.iter().enumerate() {
+        let x = centres.get(i).copied().unwrap_or(0.0);
+        if it.level == 0 {
+            accent_k = top;
+            let b = [x - big / 2.0, ly - big / 2.0, big, big];
+            let mut c = tag("ellipse", b, graded(spec, top, tops_n), spec, i);
+            c.tb = inset(b, ROUND_INSET);
+            c.line = Paint::Light;
+            c.line_w = 2.0;
+            out.push(c);
+            top += 1;
+        } else {
+            let mut c = plain("ellipse", [x - small / 2.0, ly - small / 2.0, small, small], tint(spec, accent_k, 70_000)).of_item(i);
+            c.line = Paint::Light;
+            c.line_w = 1.5;
+            out.push(c);
+            // Out to a large circle's middle beside it, or half way to a small one's.
+            let side =
+                |j: Option<usize>, edge: f32| match j.and_then(|j| spec.items.get(j).map(|o| (o.level, centres.get(j).copied().unwrap_or(edge)))) {
+                    Some((0, c)) => c,
+                    Some((_, c)) => (c + x) / 2.0,
+                    None => edge,
+                };
+            let (l, r) = (side(i.checked_sub(1), 0.0), side(Some(i + 1).filter(|&j| j < spec.items.len()), w));
+            let ty = ly + big / 2.0 + h * 0.03;
+            let lb = [l.max(0.0), ty, (r.min(w) - l.max(0.0)).max(unit * 0.5), (h * 0.99 - ty).max(0.0)];
+            out.push(line_box(lb, it.text.clone(), true, "ctr", i));
+            if let Some(last) = out.last_mut() {
+                last.anchor = "t";
+            }
+        }
     }
     out
 }

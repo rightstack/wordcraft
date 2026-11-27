@@ -282,7 +282,7 @@ fn overlap(a: [f32; 4], b: [f32; 4]) -> bool {
 
 #[test]
 fn wedges_go_round_the_circle_in_turn_and_are_picked_by_their_own_text() {
-    for layout in [SmartArtLayout::MatrixCycle, SmartArtLayout::CycleSegmented] {
+    for layout in [SmartArtLayout::MatrixCycle, SmartArtLayout::CycleSegmented, SmartArtLayout::CyclePie] {
         for n in 2..=7 {
             let spec = tops_spec(layout, n);
             let shapes = super::layout(&spec, 432.0, 252.0);
@@ -384,5 +384,110 @@ fn later_layouts_carry_our_identifier_category_and_walk() {
         let tree = x.contains("hierRoot");
         let centre = x.contains("ctrShpMap");
         assert_eq!(tree || centre, l.children_are_shapes(), "{l:?}");
+    }
+}
+
+// ---- fourth batch ----
+
+#[test]
+fn a_labeled_hierarchy_names_its_bands_with_the_later_childless_top_items() {
+    for layout in [SmartArtLayout::HierarchyLabeled, SmartArtLayout::HierarchyLabeledHorizontal] {
+        let spec = SmartArtSpec::sample(layout).sanitized();
+        // Lead … Tests make the tree; Leadership, Teams, Work (items 6–8) name the three levels.
+        let shapes = super::layout(&spec, 432.0, 252.0);
+        let bands: Vec<&Sh> = shapes.iter().filter(|s| s.prst == "rect" && s.item.is_some()).collect();
+        assert_eq!(bands.iter().map(|s| s.item).collect::<Vec<_>>(), [Some(6), Some(7), Some(8)], "{layout:?}");
+        for (k, b) in bands.iter().enumerate() {
+            let pick = b.pick.unwrap();
+            // Each band's name sits at its band's start (left, or top when the tree runs across).
+            if layout == SmartArtLayout::HierarchyLabeled {
+                assert!(pick[0] < 432.0 * 0.05 && (pick[1] - b.b[1]).abs() < 2.0, "{layout:?} band {k}: {pick:?}");
+            } else {
+                assert!(pick[1] < 252.0 * 0.05 && (pick[0] - b.b[0]).abs() < 2.0, "{layout:?} band {k}: {pick:?}");
+            }
+        }
+        // Every tree item is a node over its level's band.
+        let nodes = smart_art_nodes(&spec, 432.0, 252.0);
+        for i in 0..6 {
+            let n = nodes.iter().find(|n| n.item == i).unwrap();
+            let level = usize::from(spec.items[i].level);
+            let band = bands[level].b;
+            let (cx, cy) = (n.b[0] + n.b[2] / 2.0, n.b[1] + n.b[3] / 2.0);
+            assert!(band[0] <= cx && cx <= band[0] + band[2] && band[1] <= cy && cy <= band[1] + band[3], "{layout:?} item {i}");
+        }
+    }
+    // With no names (every top item has items under it) the bands are plain.
+    let spec = SmartArtSpec { layout: SmartArtLayout::HierarchyLabeled, ..SmartArtSpec::sample(SmartArtLayout::OrgChart) }.sanitized();
+    assert!(super::layout(&spec, 432.0, 252.0).iter().filter(|s| s.prst == "rect").all(|s| s.item.is_none()));
+}
+
+#[test]
+fn right_pointing_arrows_are_left_arrows_turned_half_round() {
+    // The drawing reader draws `rightArrow` in fixed proportions, so its shaft would not hold the text.
+    for layout in SmartArtLayout::ALL.into_iter().skip(73) {
+        let spec = SmartArtSpec::sample(layout).sanitized();
+        assert!(super::layout(&spec, 432.0, 252.0).iter().all(|s| s.prst != "rightArrow"), "{layout:?}");
+    }
+    let spec = SmartArtSpec::sample(SmartArtLayout::ArrowsConverging).sanitized();
+    let arrows: Vec<(f32, f32)> = super::layout(&spec, 432.0, 252.0).iter().filter(|s| s.prst == "leftArrow").map(|s| (s.b[0], s.rot)).collect();
+    // Skills on the left points right (in), Needs on the right points left (in).
+    assert_eq!(arrows.len(), 2);
+    assert!(arrows[0].0 < arrows[1].0 && arrows[0].1 == 180.0 && arrows[1].1 == 0.0, "{arrows:?}");
+    let spec = SmartArtSpec { layout: SmartArtLayout::ArrowsDiverging, ..spec };
+    let rots: Vec<f32> = super::layout(&spec, 432.0, 252.0).iter().filter(|s| s.prst == "leftArrow").map(|s| s.rot).collect();
+    assert_eq!(rots, [0.0, 180.0]);
+}
+
+#[test]
+fn winding_processes_turn_back_at_each_line_end() {
+    let centres = |layout: SmartArtLayout| -> Vec<(f32, f32)> {
+        let spec = tops_spec(layout, 6);
+        super::layout(&spec, 432.0, 252.0).iter().filter(|s| s.prst == "roundRect").map(|s| (s.b[0] + s.b[2] / 2.0, s.b[1] + s.b[3] / 2.0)).collect()
+    };
+    // Snaking: three a row, the second row right to left, the turn straight down.
+    let c = centres(SmartArtLayout::ProcessSnake);
+    assert_eq!(c.len(), 6);
+    assert!(c[0].0 < c[1].0 && c[1].0 < c[2].0 && c[3].0 > c[4].0 && c[4].0 > c[5].0, "{c:?}");
+    assert!((c[2].0 - c[3].0).abs() < 0.5 && c[3].1 > c[2].1);
+    // Vertical bending: down the first column, up the second.
+    let c = centres(SmartArtLayout::ProcessBendingVertical);
+    let per = c.iter().take_while(|p| (p.0 - c[0].0).abs() < 0.5).count();
+    assert!((2..6).contains(&per), "{c:?}");
+    assert!(c[per].1 > c[per + 1].1 || per + 1 >= c.len(), "the second column goes up: {c:?}");
+    assert!((c[per - 1].1 - c[per].1).abs() < 0.5, "the turn is straight across");
+}
+
+#[test]
+fn a_circle_accent_timeline_gives_every_item_a_circle_on_one_line() {
+    let spec = SmartArtSpec::sample(SmartArtLayout::TimelineCircleAccent).sanitized();
+    let shapes = super::layout(&spec, 432.0, 252.0);
+    let circles: Vec<&Sh> = shapes.iter().filter(|s| s.prst == "ellipse" && s.item.is_some()).collect();
+    assert_eq!(circles.iter().map(|s| s.item.unwrap()).collect::<Vec<_>>(), (0..spec.items.len()).collect::<Vec<_>>());
+    let mid = |s: &Sh| s.b[1] + s.b[3] / 2.0;
+    assert!(circles.iter().all(|s| (mid(s) - mid(circles[0])).abs() < 0.5), "all on the line");
+    for (k, s) in circles.iter().enumerate() {
+        let big = spec.items[k].level == 0;
+        assert_eq!(s.b[2] > circles[1].b[2] * 1.5, big, "top items are the large circles");
+        if k > 0 {
+            assert!(s.b[0] >= circles[k - 1].b[0] + circles[k - 1].b[2] - 0.01, "in order, apart");
+        }
+    }
+}
+
+#[test]
+fn a_stacked_venn_and_a_nested_target_pick_each_item_by_its_own_band() {
+    for layout in [SmartArtLayout::VennStacked, SmartArtLayout::TargetNested, SmartArtLayout::ListTarget] {
+        for n in 1..=6 {
+            let spec = tops_spec(layout, n);
+            let nodes = smart_art_nodes(&spec, 432.0, 252.0);
+            assert_eq!(nodes.len(), n, "{layout:?} {n}");
+            for (k, a) in nodes.iter().enumerate() {
+                for b in &nodes[k + 1..] {
+                    assert!(!overlap(a.b, b.b), "{layout:?} {n}: {a:?} {b:?}");
+                }
+                let (cx, cy) = (a.b[0] + a.b[2] / 2.0, a.b[1] + a.b[3] / 2.0);
+                assert_eq!(smart_art_item_at(&spec, 432.0, 252.0, cx, cy), Some(a.item), "{layout:?} {n}");
+            }
+        }
     }
 }

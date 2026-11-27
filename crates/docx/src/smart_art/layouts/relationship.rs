@@ -3,7 +3,9 @@
 use wordcraft_doc::smart_art::SmartArtSpec;
 
 use super::matrix::spokes;
-use crate::smart_art::shapes::{Ink, Paint, ROUND_INSET, Sh, card, graded, inset, label, lines_of, plain, polar, tint, tops};
+use crate::smart_art::shapes::{
+    Ink, Paint, ROUND_INSET, Sh, angle, arrow, card, graded, graded_light, inset, label, lines_of, plain, polar, sign, tag, tint, tops,
+};
 
 /// Two sides on a beam over a stand: the first top item (and every other one after) on the left,
 /// the second on the right, stacked as boxes above the beam's ends; the beam tips towards the side
@@ -308,6 +310,488 @@ pub(crate) fn radial_diverging(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
         let (ux, uy) = at(k);
         let (ex, ey) = (cx + (ux - cx) * rx, cy + (uy - cy) * ry);
         let mut s = card("roundRect", [ex - bw / 2.0, ey - bh / 2.0, bw, bh], graded(spec, k + 1, n + 1), spec, i);
+        s.adj = vec![("adj", 12_000)];
+        out.push(s);
+    }
+    out
+}
+
+// ---- fourth batch ----
+
+/// The text box of an arrow pointing `right` (or left) in `b`: its shaft, short of its head.
+fn shaft_box(b: [f32; 4], right: bool) -> [f32; 4] {
+    let head = b[2].min(b[3]) * 0.5;
+    let pad = b[2] * 0.05;
+    let x = if right { b[0] + pad } else { b[0] + head };
+    [x, b[1] + b[3] * 0.14, (b[2] - head - pad).max(0.0), b[3] * 0.72]
+}
+
+/// An arrow (`rightArrow` or `leftArrow`) in `b` holding item `i`'s text.
+fn text_arrow(spec: &SmartArtSpec, i: usize, b: [f32; 4], right: bool, fill: Paint) -> Sh {
+    // A right arrow is a left arrow turned half round (see `arrow`).
+    let mut a = card("leftArrow", b, fill, spec, i).turned(if right { 180.0 } else { 0.0 });
+    a.adj = vec![("adj1", 76_000), ("adj2", 50_000)];
+    a.tb = shaft_box(b, right);
+    a
+}
+
+/// The first half of the top items on the left, the rest on the right, each in an arrow pointing
+/// in to the middle (`inward`) or out from it; more than one a side are stacked.
+fn arrows_sides(spec: &SmartArtSpec, w: f32, h: f32, inward: bool) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let left = n.div_ceil(2);
+    let rows = left.max(1);
+    let rh = h / rows as f32;
+    let aw = if n == 1 { w * 0.9 } else { w * 0.47 };
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let on_left = k < left;
+        let row = if on_left { k } else { k - left };
+        let x = if n == 1 {
+            w * 0.05
+        } else if on_left {
+            w * 0.02
+        } else {
+            w * 0.51
+        };
+        let ah = (rh * 0.84).min(aw * 0.6);
+        let b = [x, rh * row as f32 + (rh - ah) / 2.0, aw, ah];
+        out.push(text_arrow(spec, i, b, on_left == inward, graded(spec, k, n)));
+    }
+    out
+}
+
+pub(crate) fn arrows_converging(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    arrows_sides(spec, w, h, true)
+}
+
+pub(crate) fn arrows_diverging(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    arrows_sides(spec, w, h, false)
+}
+
+/// Wide arrows stacked, pointing right and left in turn (offset), each item's text inside.
+pub(crate) fn arrows_counterbalance(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let rh = h / n as f32;
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let right = k % 2 == 0;
+        let ah = (rh * 0.84).min(w * 0.4);
+        let b = [if right { w * 0.01 } else { w * 0.13 }, rh * k as f32 + (rh - ah) / 2.0, w * 0.86, ah];
+        out.push(text_arrow(spec, i, b, right, graded(spec, k, n)));
+    }
+    out
+}
+
+/// The first item in a circle in the middle and the items under it in see-through circles over
+/// its edge; each item's text in its own circle, away from the others.
+pub(crate) fn venn_radial(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let around = spokes(spec);
+    let n = around.len();
+    let m = w.min(h);
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let dc = if n == 0 { m * 0.7 } else { m * 0.56 };
+    let rc = dc / 2.0;
+    let chord = if n <= 1 { m } else { 2.0 * rc * (std::f32::consts::PI / n as f32).sin() };
+    let ds = (m * 0.4).min(m - dc - m * 0.02).min(chord * 1.9).max(m * 0.1);
+    let one = spec.colors != wordcraft_doc::smart_art::SmartArtColors::Colorful;
+    let mut centre =
+        plain("ellipse", [cx - rc, cy - rc, dc, dc], Paint::Accent(spec.colors.accent(0), Some(if one { 30_000 } else { 40_000 }))).of_item(0);
+    centre.line = Paint::Accent(spec.colors.accent(0), None);
+    centre.line_w = 1.5;
+    let mut out = vec![centre];
+    let mut labels = Vec::new();
+    let tc = dc * if n == 0 { 0.6 } else { 0.44 };
+    let mut centre_text = label(spec, 0, [cx - tc / 2.0, cy - tc / 2.0, tc, tc], "ctr", "ctr");
+    centre_text.text = lines_of(spec, 0, true, n == 0);
+    labels.push(centre_text);
+    for (k, &i) in around.iter().enumerate() {
+        let a = angle(k, n);
+        let (x, y) = polar(cx, cy, rc, a);
+        let mut s = plain("ellipse", [x - ds / 2.0, y - ds / 2.0, ds, ds], Paint::Accent(spec.colors.accent(k + 1), Some(45_000))).of_item(i);
+        s.alpha = Some(60_000);
+        s.line = Paint::Accent(spec.colors.accent(k + 1), None);
+        s.line_w = 1.0;
+        out.push(s);
+        let (tx, ty) = polar(cx, cy, rc + ds * 0.2, a);
+        let t = ds * 0.5;
+        labels.push(label(spec, i, [tx - t / 2.0, ty - t * 0.35, t, t * 0.7], "ctr", "ctr"));
+    }
+    out.extend(labels);
+    for s in &mut out {
+        if !s.text.is_empty() {
+            s.ink = Ink::Dark;
+        }
+    }
+    out
+}
+
+/// See-through circles inside each other, all standing on one point at the bottom, the first the
+/// largest; each item's text at the top of its own band.
+pub(crate) fn venn_stacked(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let big = (h * 0.98).min(w * 0.98);
+    let d = |k: usize| if n > 1 { big * (1.0 - 0.62 * k as f32 / (n - 1) as f32) } else { big };
+    let (cx, bottom) = (w / 2.0, h * 0.99);
+    let mut out = Vec::new();
+    let mut labels = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let dk = d(k);
+        let top = bottom - dk;
+        let band = if k + 1 < tops.len() { dk - d(k + 1) } else { dk };
+        let tb = if k + 1 < tops.len() {
+            // The chord half way down the band.
+            let r = dk / 2.0;
+            let depth = band * 0.5;
+            let chord = 2.0 * (r * r - (r - depth).powi(2)).max(0.0).sqrt();
+            let tw = (chord * 0.86).min(dk * 0.6);
+            [cx - tw / 2.0, top + band * 0.1, tw, band * 0.8]
+        } else {
+            inset([cx - dk / 2.0, top, dk, dk], ROUND_INSET)
+        };
+        let mut s = plain(
+            "ellipse",
+            [cx - dk / 2.0, top, dk, dk],
+            Paint::Accent(spec.colors.accent(k), Some(if n > 1 { 30_000 + 25_000 * k as u32 / (n - 1) as u32 } else { 40_000 })),
+        )
+        .of_item(i)
+        .picked_by(tb);
+        s.line = Paint::Light;
+        s.line_w = 1.5;
+        out.push(s);
+        labels.push(label(spec, i, tb, "ctr", "ctr"));
+    }
+    out.extend(labels);
+    out
+}
+
+/// Rounded rectangles inside each other, the first outermost; each item's text at the top of its
+/// own band (the innermost holds its text in the middle).
+pub(crate) fn target_nested(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let (x0, y0, ww, hh) = (w * 0.01, h * 0.01, w * 0.98, h * 0.98);
+    let t = hh / (1.25 * (n - 1) as f32 + 1.4);
+    let sx = (ww * 0.04).min(ww / (2.0 * n as f32 + 1.0));
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let kf = k as f32;
+        let b = [x0 + sx * kf, y0 + t * kf, (ww - 2.0 * sx * kf).max(0.0), (hh - 1.25 * t * kf).max(0.0)];
+        let last = k + 1 == tops.len();
+        let keep = if n > 1 { 18_000 + 52_000 * k as u32 / (n - 1) as u32 } else { 40_000 };
+        let tb = if last { inset(b, 0.08) } else { [b[0] + sx * 0.5, b[1], (b[2] - sx).max(0.0), t] };
+        let mut s =
+            card("roundRect", b, tint(spec, if spec.colors == wordcraft_doc::smart_art::SmartArtColors::Colorful { k } else { 0 }, keep), spec, i)
+                .picked_by(tb);
+        s.adj = vec![("adj", 6_000)];
+        s.tb = tb;
+        s.line = Paint::Light;
+        s.line_w = 1.5;
+        out.push(s);
+    }
+    out
+}
+
+/// The first item in a large light circle, the items under it in small filled circles round its edge.
+pub(crate) fn circle_relationship(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let around = spokes(spec);
+    let n = around.len();
+    let m = w.min(h);
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let dc = m * if n == 0 { 0.8 } else { 0.66 };
+    let rc = dc / 2.0;
+    let chord = if n <= 1 { m } else { 2.0 * rc * (std::f32::consts::PI / n as f32).sin() };
+    let ds = (m * 0.28).min(m * 0.98 - dc).min(chord * 0.92).max(m * 0.06);
+    let bc = [cx - rc, cy - rc, dc, dc];
+    let mut c = card("ellipse", bc, tint(spec, 0, 25_000), spec, 0);
+    c.text = lines_of(spec, 0, true, false);
+    c.tb = inset(bc, if n == 0 { ROUND_INSET } else { 0.3 });
+    c.line = Paint::Accent(spec.colors.accent(0), Some(60_000));
+    c.line_w = 1.5;
+    let mut out = vec![c];
+    for (k, &i) in around.iter().enumerate() {
+        let (x, y) = polar(cx, cy, rc, angle(k, n) + 45.0);
+        let b = [x - ds / 2.0, y - ds / 2.0, ds, ds];
+        let mut s = card("ellipse", b, graded(spec, k + 1, n + 1), spec, i);
+        s.tb = inset(b, ROUND_INSET);
+        s.line = Paint::Light;
+        s.line_w = 2.0;
+        out.push(s);
+    }
+    out
+}
+
+/// Columns under a plus sign and a minus sign in turn, each item's text in a light box under its sign.
+pub(crate) fn plus_minus(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let cw = w / n as f32;
+    let s = (cw * 0.3).min(h * 0.22);
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let x = cw * k as f32;
+        let top = h * 0.04 + s;
+        let b = [x + cw * 0.05, top, cw * 0.9, (h * 0.99 - top).max(0.0)];
+        let mut c = card("roundRect", b, graded_light(spec, k, n, 22_000, 14_000), spec, i);
+        c.adj = vec![("adj", 6_000)];
+        c.tb = [b[0] + b[2] * 0.08, b[1] + b[3] * 0.06, b[2] * 0.84, b[3] * 0.88];
+        c.anchor = "t";
+        out.push(c);
+        out.extend(sign(x + cw / 2.0, h * 0.02 + s / 2.0, s, k % 2 == 0, graded(spec, k, n)));
+    }
+    out
+}
+
+/// Rows: the items under each top item in light boxes on the left, arrows pointing from each box
+/// into a circle holding the top item.
+pub(crate) fn text_converging(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let size = |i: usize| spec.descendants(i).len().max(1) as f32;
+    let total: f32 = tops.iter().map(|&i| size(i)).sum::<f32>().max(1.0);
+    let unit = h / total;
+    let mut out = Vec::new();
+    let mut boxes = Vec::new();
+    let mut y0 = 0.0;
+    for (k, &i) in tops.iter().enumerate() {
+        let rh = size(i) * unit;
+        let kids: Vec<usize> = spec.descendants(i).collect();
+        let d = (rh * 0.9).min(w * 0.3);
+        let (ccx, ccy) = (if kids.is_empty() { w / 2.0 } else { w * 0.99 - d / 2.0 }, y0 + rh / 2.0);
+        let bw = w * 0.36;
+        for (j, &c) in kids.iter().enumerate() {
+            let bh = unit * 0.8;
+            let b = [w * 0.01, y0 + unit * j as f32 + unit * 0.1, bw, bh];
+            let mut s = tag("roundRect", b, graded_light(spec, k, tops.len(), 26_000, 16_000), spec, c);
+            s.adj = vec![("adj", 12_000)];
+            boxes.push(s);
+            // An arrow from the box's right end towards the circle, halfway.
+            let (x0, y) = (b[0] + bw, b[1] + bh / 2.0);
+            let (x1, y1) = (ccx - d / 2.0, ccy);
+            let dist = (x1 - x0).hypot(y1 - y);
+            let len = (dist * 0.6).max(0.0);
+            let (mx, my) = ((x0 + x1) / 2.0, (y + y1) / 2.0);
+            let room = 2.0 * mx.min(w - mx).min(my).min(h - my);
+            let len = len.min(room);
+            if len > 2.0 {
+                let th = (bh * 0.36).min(len * 0.5);
+                let deg = (y1 - y).atan2(x1 - x0).to_degrees();
+                out.push(arrow("rightArrow", [mx - len / 2.0, my - th / 2.0, len, th], tint(spec, k, 55_000), 50_000, 60_000).turned_by(deg));
+            }
+        }
+        let cb = [ccx - d / 2.0, ccy - d / 2.0, d, d];
+        let mut c = tag("ellipse", cb, graded(spec, k, tops.len()), spec, i);
+        c.tb = inset(cb, ROUND_INSET);
+        boxes.push(c);
+        y0 += rh;
+    }
+    out.extend(boxes);
+    out
+}
+
+/// The first item in a large circle on the left, the items under it in small circles on an arc
+/// beside it, each one's text to its right.
+pub(crate) fn radial_list(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let around = spokes(spec);
+    let n = around.len();
+    let dc = (h * 0.7).min(w * 0.34);
+    let (cx, cy) = (w * 0.01 + dc / 2.0, h / 2.0);
+    let mut out = Vec::new();
+    let ds = (h * 0.96 / n.max(1) as f32 * 0.7).min(w * 0.1).min(dc * 0.5);
+    let r = (dc / 2.0 + ds * 0.9).max((h / 2.0 - ds / 2.0) * 0.98);
+    let y_at = |k: usize| ds / 2.0 + h * 0.01 + (h * 0.98 - ds) * (k as f32 + 0.5) / n.max(1) as f32;
+    let x_at = |k: usize| {
+        let dy = (y_at(k) - cy).abs().min(r);
+        (cx + (r * r - dy * dy).sqrt()).min(w * 0.6)
+    };
+    for k in 0..n {
+        let mut l = Sh::line(cx, cy, x_at(k), y_at(k), spec.colors.accent(k + 1));
+        l.line_w = 1.0;
+        out.push(l);
+    }
+    let bc = [cx - dc / 2.0, cy - dc / 2.0, dc, dc];
+    let mut c = card("ellipse", bc, graded(spec, 0, 1), spec, 0);
+    c.text = lines_of(spec, 0, true, false);
+    c.tb = inset(bc, ROUND_INSET);
+    c.line = Paint::Light;
+    c.line_w = 2.0;
+    out.push(c);
+    for (k, &i) in around.iter().enumerate() {
+        let (x, y) = (x_at(k), y_at(k));
+        let mut s = plain("ellipse", [x - ds / 2.0, y - ds / 2.0, ds, ds], graded(spec, k + 1, n + 1)).of_item(i);
+        s.line = Paint::Light;
+        s.line_w = 2.0;
+        out.push(s);
+        let tx = x + ds * 0.7;
+        let lh = (h / n.max(1) as f32).max(ds);
+        out.push(label(spec, i, [tx, (y - lh / 2.0).clamp(0.0, (h - lh).max(0.0)), (w * 0.99 - tx).max(0.0), lh.min(h)], "l", "ctr"));
+    }
+    out
+}
+
+/// The items but the last in circles from top to bottom joined by plus signs; an arrow from them
+/// to the last item in a larger circle on the right.
+pub(crate) fn equation_vertical(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let mut out = Vec::new();
+    let Some((&last, parts)) = tops.split_last() else { return out };
+    let circle = |b: [f32; 4], k: usize, i: usize| {
+        let mut c = card("ellipse", b, graded(spec, k, n), spec, i);
+        c.tb = inset(b, ROUND_INSET);
+        c
+    };
+    if parts.is_empty() {
+        let d = w.min(h) * 0.7;
+        out.push(circle([(w - d) / 2.0, (h - d) / 2.0, d, d], 0, last));
+        return out;
+    }
+    let m = parts.len() as f32;
+    const OP: f32 = 0.4;
+    let d = (h * 0.98 / (m + (m - 1.0) * OP)).min(w * 0.3);
+    let total = m * d + (m - 1.0) * d * OP;
+    let mut y = (h - total) / 2.0;
+    let x = w * 0.04;
+    for (k, &i) in parts.iter().enumerate() {
+        if k > 0 {
+            out.extend(sign(x + d / 2.0, y + d * OP / 2.0, d * OP * 0.8, true, tint(spec, 0, 60_000)));
+            y += d * OP;
+        }
+        out.push(circle([x, y, d, d], k, i));
+        y += d;
+    }
+    let big = (h * 0.7).min(w * 0.36);
+    let bx = w * 0.98 - big;
+    let ax0 = x + d + w * 0.04;
+    let len = (bx - w * 0.04 - ax0).max(0.0);
+    if len > 2.0 {
+        let th = (big * 0.3).min(len * 0.6);
+        out.push(arrow("rightArrow", [ax0, h / 2.0 - th / 2.0, len, th], tint(spec, 0, 60_000), 50_000, 60_000));
+    }
+    out.push(circle([bx, (h - big) / 2.0, big, big], n - 1, last));
+    out
+}
+
+/// Thick rings linked in a row, each item's text inside its ring.
+pub(crate) fn rings_interconnected(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let tops = tops(spec);
+    let n = tops.len().max(1);
+    let d = (w * 0.96 / (1.0 + 0.8 * (n - 1) as f32)).min(h * 0.96);
+    let x0 = (w - d * (1.0 + 0.8 * (n - 1) as f32)) / 2.0;
+    let y = (h - d) / 2.0;
+    let t = (d * 0.08).clamp(1.0, 14.0);
+    let mut out = Vec::new();
+    for (k, &i) in tops.iter().enumerate() {
+        let x = x0 + d * 0.8 * k as f32;
+        let mut r = plain("ellipse", [x + t / 2.0, y + t / 2.0, d - t, d - t], Paint::None).of_item(i);
+        r.line = Paint::Accent(
+            spec.colors.accent(k),
+            if spec.colors == wordcraft_doc::smart_art::SmartArtColors::Colorful { None } else { graded_keep(k, n) },
+        );
+        r.line_w = t;
+        out.push(r);
+    }
+    for (k, &i) in tops.iter().enumerate() {
+        let x = x0 + d * 0.8 * k as f32;
+        let tw = d * if n == 1 { 0.6 } else { 0.5 };
+        out.push(label(spec, i, [x + (d - tw) / 2.0, y + d * 0.25, tw, d * 0.5], "ctr", "ctr"));
+    }
+    out
+}
+
+/// The tint kept for item `k` of `n` in a one-accent graphic (full to half).
+fn graded_keep(k: usize, n: usize) -> Option<u32> {
+    if n <= 1 {
+        return None;
+    }
+    let t = 100_000 - 50_000 * k.min(n - 1) as u32 / (n - 1) as u32;
+    Some(t).filter(|t| *t < 100_000)
+}
+
+/// The first item in a block in the middle, the items under it in smaller blocks round it, joined
+/// by lines.
+pub(crate) fn radial_cluster(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let around = spokes(spec);
+    let n = around.len();
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let m = w.min(h);
+    let (cw, ch) = ((w * 0.3).min(m * 0.6), (h * 0.26).min(m * 0.36));
+    let bw = (w * 0.22).min(m * 0.46);
+    let bh = (h * 0.18).min(bw * 0.6);
+    let (rx, ry) = (((w - bw) / 2.0).max(0.0), ((h - bh) / 2.0).max(0.0));
+    let at = |k: usize| {
+        let a = angle(k, n.max(1)).to_radians();
+        (cx + rx * a.cos(), cy + ry * a.sin())
+    };
+    let mut out = Vec::new();
+    for k in 0..n {
+        let (x, y) = at(k);
+        out.push(Sh::line(cx, cy, x, y, spec.colors.accent(k + 1)));
+    }
+    let b = [cx - cw / 2.0, cy - ch / 2.0, cw, ch];
+    let mut c = card("roundRect", b, graded(spec, 0, 1), spec, 0);
+    c.text = lines_of(spec, 0, true, n == 0);
+    c.adj = vec![("adj", 12_000)];
+    out.push(c);
+    for (k, &i) in around.iter().enumerate() {
+        let (x, y) = at(k);
+        let mut s = card("roundRect", [x - bw / 2.0, y - bh / 2.0, bw, bh], graded(spec, k + 1, n + 1), spec, i);
+        s.adj = vec![("adj", 12_000)];
+        s.line = Paint::Light;
+        s.line_w = 1.5;
+        out.push(s);
+    }
+    out
+}
+
+/// The items under the first on an arc above, arrows pointing down to the first item in a circle
+/// at the bottom middle.
+pub(crate) fn radial_converging(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
+    let around = spokes(spec);
+    let n = around.len();
+    let dc = (h * 0.4).min(w * 0.3);
+    let (cx, cyc) = (w / 2.0, h * 0.99 - dc / 2.0);
+    let bw = (w * 0.24).min(w * 0.94 / (n.max(1) as f32 * 0.7 + 0.3));
+    let bh = (h * 0.2).min(bw * 0.6);
+    let rx = ((w - bw) / 2.0 * 0.98).max(0.0);
+    let ry = (cyc - bh / 2.0 - h * 0.01).max(0.0);
+    let theta = |k: usize| if n <= 1 { 270.0f32 } else { 200.0 + 140.0 * k as f32 / (n - 1) as f32 };
+    let at = |k: usize| {
+        let t = theta(k).to_radians();
+        (cx + rx * t.cos(), cyc + ry * t.sin())
+    };
+    let mut out = Vec::new();
+    for k in 0..n {
+        let (bx, by) = at(k);
+        let (dx, dy) = (cx - bx, cyc - by);
+        let dist = dx.hypot(dy).max(0.01);
+        // How far the block reaches from its middle towards the circle.
+        let (ux, uy) = ((dx / dist).abs().max(1.0e-3), (dy / dist).abs().max(1.0e-3));
+        let reach = (bw / 2.0 / ux).min(bh / 2.0 / uy);
+        let free = (dist - dc / 2.0 - reach).max(0.0);
+        let len = (free * 0.6).max(0.0);
+        let mid = reach + free * 0.5;
+        let (mx, my) = (bx + dx / dist * mid, by + dy / dist * mid);
+        let room = 2.0 * mx.min(w - mx).min(my).min(h - my);
+        let len = len.min(room);
+        if len > 2.0 {
+            let th = (len * 0.5).min(bh * 0.5);
+            out.push(
+                arrow("rightArrow", [mx - len / 2.0, my - th / 2.0, len, th], tint(spec, k + 1, 60_000), 50_000, 60_000)
+                    .turned_by(dy.atan2(dx).to_degrees()),
+            );
+        }
+    }
+    let bc = [cx - dc / 2.0, cyc - dc / 2.0, dc, dc];
+    let mut c = card("ellipse", bc, graded(spec, 0, 1), spec, 0);
+    c.text = lines_of(spec, 0, true, n == 0);
+    c.tb = inset(bc, ROUND_INSET);
+    out.push(c);
+    for (k, &i) in around.iter().enumerate() {
+        let (x, y) = at(k);
+        let mut s = card("roundRect", [x - bw / 2.0, y - bh / 2.0, bw, bh], graded(spec, k + 1, n + 1), spec, i);
         s.adj = vec![("adj", 12_000)];
         out.push(s);
     }

@@ -426,6 +426,66 @@ pub(crate) fn grid_cell(k: usize, n: usize, cols: usize, b: [f32; 4]) -> [f32; 4
     [x0 + c as f32 * cw, b[1] + r as f32 * rh, cw, rh]
 }
 
+// ---- shared by the fourth batch ----
+
+/// The lines under item `i` (no own line) in a box with no fill, for the item's shape elsewhere.
+pub(crate) fn kids_label(spec: &SmartArtSpec, i: usize, b: [f32; 4], algn: &'static str, anchor: &'static str) -> Sh {
+    let mut s = label(spec, i, b, algn, anchor);
+    s.text = lines_of(spec, i, false, true);
+    s
+}
+
+/// The lines under item `i` as bullets (`• `), sub-item size.
+pub(crate) fn bullets(spec: &SmartArtSpec, i: usize) -> Vec<(String, bool)> {
+    spec.descendants(i).filter_map(|j| spec.items.get(j)).map(|it| (format!("• {}", it.text), true)).collect()
+}
+
+/// One line of `text` in a box `b` with no fill, standing for item `item` (`child`: sub-item size).
+pub(crate) fn line_box(b: [f32; 4], text: String, child: bool, algn: &'static str, item: usize) -> Sh {
+    let mut s = plain("rect", b, Paint::None);
+    s.text = vec![(text, child)];
+    s.tb = b;
+    s.algn = Some(algn);
+    s.item = Some(item);
+    s
+}
+
+/// A block arrow (`rightArrow`, `leftArrow`, `upArrow`, `downArrow`) in `b`, `shaft` and `head`
+/// in thousandths of a percent (the preset's `adj1`, `adj2`). A right arrow is written as a left
+/// arrow turned half round: the drawing reader draws `rightArrow` in fixed proportions, so its
+/// shaft and head would not follow `adj` (the box, and so the text box, is the same either way).
+/// Turn it further with [`Sh::turned_by`].
+pub(crate) fn arrow(prst: &'static str, b: [f32; 4], paint: Paint, shaft: i64, head: i64) -> Sh {
+    let right = prst == "rightArrow";
+    let mut a = plain(if right { "leftArrow" } else { prst }, b, paint);
+    a.adj = vec![("adj1", shaft), ("adj2", head)];
+    if right { a.turned(180.0) } else { a }
+}
+
+impl Sh {
+    /// The shape turned `deg` degrees further clockwise.
+    pub(crate) fn turned_by(self, deg: f32) -> Sh {
+        let r = self.rot;
+        self.turned(r + deg)
+    }
+}
+
+/// A `hexagon` preset's `adj` that makes its slanted sides a quarter of `b`'s width.
+pub(crate) fn hex_adj(b: [f32; 4]) -> i64 {
+    let ss = b[2].min(b[3]).max(0.01);
+    (b[2] * 0.25 / ss * 100_000.0).round().clamp(0.0, 100_000.0) as i64
+}
+
+/// A plus sign (or a minus, `plus` false) `s` across centred on (`cx`, `cy`), in `paint`.
+pub(crate) fn sign(cx: f32, cy: f32, s: f32, plus: bool, paint: Paint) -> Vec<Sh> {
+    let t = s * 0.22;
+    let mut out = vec![plain("rect", [cx - s / 2.0, cy - t / 2.0, s, t], paint)];
+    if plus {
+        out.push(plain("rect", [cx - t / 2.0, cy - s / 2.0, t, s], paint));
+    }
+    out
+}
+
 /// The number of columns (1 to `n`) that makes cells of aspect `aspect` (width over height) the
 /// largest in a `w` × `h` box.
 pub(crate) fn best_cols(n: usize, w: f32, h: f32, aspect: f32) -> usize {

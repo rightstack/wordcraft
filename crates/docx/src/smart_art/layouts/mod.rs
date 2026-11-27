@@ -97,6 +97,56 @@ pub(crate) fn draw(spec: &SmartArtSpec, w: f32, h: f32) -> Vec<Sh> {
         L::ListTrapezoid => list::list_trapezoid(spec, w, h),
         L::ListDescending => list::list_descending(spec, w, h),
         L::ListTable => list::list_table(spec, w, h),
+        L::ListHexagonAlternating => list::list_hexagon_alternating(spec, w, h),
+        L::ListVerticalBox => list::list_vertical_box(spec, w, h),
+        L::ListHorizontalBullet => list::list_horizontal_bullet(spec, w, h),
+        L::ListSquareAccent => list::list_square_accent(spec, w, h),
+        L::ListStacked => list::list_stacked(spec, w, h),
+        L::ListVerticalBlock => list::list_vertical_block(spec, w, h),
+        L::ListVerticalArrow => list::list_vertical_arrow(spec, w, h),
+        L::ListTarget => list::list_target(spec, w, h),
+        L::ListVerticalCircle => list::list_vertical_circle(spec, w, h),
+        L::ListVaryingWidth => list::list_varying_width(spec, w, h),
+        L::ListTab => list::list_tab(spec, w, h),
+        L::ListCurved => list::list_curved(spec, w, h),
+        L::ProcessAccent => process::process_accent(spec, w, h),
+        L::ProcessAlternatingFlow => process::process_alternating_flow(spec, w, h),
+        L::ChevronsClosed => process::chevrons_closed(spec, w, h),
+        L::ChevronsDetailed => process::chevrons_detailed(spec, w, h),
+        L::ProcessCircle => process::process_circle(spec, w, h),
+        L::ProcessSegmented => process::process_segmented(spec, w, h),
+        L::ProcessSnake => process::process_snake(spec, w, h),
+        L::ProcessBendingVertical => process::process_bending_vertical(spec, w, h),
+        L::StepDown => process::step_down(spec, w, h),
+        L::ProcessIncreasingArrows => process::process_increasing_arrows(spec, w, h),
+        L::ProcessContinuousArrow => process::process_continuous_arrow(spec, w, h),
+        L::ProcessList => process::process_list(spec, w, h),
+        L::ArrowDownward => process::arrow_downward(spec, w, h),
+        L::ProcessCirclesIncreasing => process::process_circles_increasing(spec, w, h),
+        L::CycleBlock => cycle::cycle_block(spec, w, h),
+        L::CycleNondirectional => cycle::cycle_nondirectional(spec, w, h),
+        L::CyclePie => cycle::cycle_pie(spec, w, h),
+        L::CycleHexagonRadial => cycle::cycle_hexagon_radial(spec, w, h),
+        L::OrgChartHalfCircle => hierarchy::org_chart_half_circle(spec, w, h),
+        L::HierarchyLabeled => hierarchy::hierarchy_labeled(spec, w, h),
+        L::HierarchyLabeledHorizontal => hierarchy::hierarchy_labeled_horizontal(spec, w, h),
+        L::HierarchyArchitecture => hierarchy::hierarchy_architecture(spec, w, h),
+        L::HierarchyTableHorizontal => hierarchy::hierarchy_table_horizontal(spec, w, h),
+        L::ArrowsConverging => relationship::arrows_converging(spec, w, h),
+        L::ArrowsDiverging => relationship::arrows_diverging(spec, w, h),
+        L::ArrowsCounterbalance => relationship::arrows_counterbalance(spec, w, h),
+        L::VennRadial => relationship::venn_radial(spec, w, h),
+        L::VennStacked => relationship::venn_stacked(spec, w, h),
+        L::TargetNested => relationship::target_nested(spec, w, h),
+        L::CircleRelationship => relationship::circle_relationship(spec, w, h),
+        L::PlusMinus => relationship::plus_minus(spec, w, h),
+        L::TextConverging => relationship::text_converging(spec, w, h),
+        L::RadialList => relationship::radial_list(spec, w, h),
+        L::EquationVertical => relationship::equation_vertical(spec, w, h),
+        L::RingsInterconnected => relationship::rings_interconnected(spec, w, h),
+        L::RadialCluster => relationship::radial_cluster(spec, w, h),
+        L::RadialConverging => relationship::radial_converging(spec, w, h),
+        L::TimelineCircleAccent => cards::timeline_circle_accent(spec, w, h),
     }
 }
 
@@ -150,6 +200,34 @@ pub(crate) fn def(l: L) -> Def {
             d("lin", ROW, if l == L::Chevrons { "chevron" } else { "roundRect" }, Tree::Items)
         }
         L::ListTrapezoid | L::ListDescending | L::ListTable => d("lin", ROW, "rect", Tree::Items),
+        L::ListVerticalBox
+        | L::ListVerticalBlock
+        | L::ListVerticalArrow
+        | L::ListTarget
+        | L::ListVerticalCircle
+        | L::ListVaryingWidth
+        | L::ListTab => d("lin", COLUMN, "rect", Tree::Items),
+        L::ListCurved | L::ProcessCirclesIncreasing => d("lin", COLUMN, "ellipse", Tree::Items),
+        L::ListHexagonAlternating => d("lin", ROW, "hexagon", Tree::Items),
+        L::ListHorizontalBullet | L::ListSquareAccent | L::ListStacked | L::ProcessAccent | L::ProcessAlternatingFlow | L::PlusMinus => {
+            d("lin", ROW, "rect", Tree::Items)
+        }
+        L::ChevronsClosed | L::ChevronsDetailed => d("lin", ROW, "chevron", Tree::Items),
+        L::ProcessCircle | L::StepDown | L::ArrowDownward | L::RingsInterconnected | L::VennStacked => d("lin", ROW, "ellipse", Tree::Items),
+        L::ProcessSnake | L::ProcessBendingVertical => d("snake", SNAKE, "roundRect", Tree::Items),
+        L::ProcessIncreasingArrows | L::ProcessContinuousArrow | L::ArrowsConverging | L::ArrowsDiverging => d("lin", ROW, "rightArrow", Tree::Items),
+        L::ArrowsCounterbalance | L::TargetNested | L::EquationVertical => d("lin", COLUMN, "roundRect", Tree::Items),
+        L::ProcessSegmented | L::TextConverging => d("hierChild", TREE_ACROSS, "roundRect", Tree::Hier),
+        L::ProcessList | L::OrgChartHalfCircle | L::HierarchyLabeled | L::HierarchyArchitecture | L::TimelineCircleAccent => {
+            d("hierChild", TREE, if l == L::TimelineCircleAccent { "ellipse" } else { "roundRect" }, Tree::Hier)
+        }
+        L::HierarchyLabeledHorizontal | L::HierarchyTableHorizontal => d("hierChild", TREE_ACROSS, "rect", Tree::Hier),
+        L::CycleBlock => d("cycle", RING, "roundRect", Tree::Items),
+        L::CycleNondirectional => d("cycle", RING, "ellipse", Tree::Items),
+        L::CyclePie => d("cycle", RING, "pie", Tree::Items),
+        L::CycleHexagonRadial => d("cycle", CENTRE, "hexagon", Tree::Radial),
+        L::VennRadial | L::CircleRelationship | L::RadialList | L::RadialConverging => d("cycle", CENTRE, "ellipse", Tree::Radial),
+        L::RadialCluster => d("cycle", CENTRE, "roundRect", Tree::Radial),
         _ => d("lin", ROW, "rect", Tree::Items),
     }
 }

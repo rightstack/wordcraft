@@ -170,10 +170,110 @@ pub enum SmartArtLayout {
     ListDescending,
     /// The first item as a header across the top, the others as columns under it.
     ListTable,
+    /// A zigzag of hexagons: each item's line in a filled one, its lines in a light one beside it.
+    ListHexagonAlternating,
+    /// Rows: a light box with the item's lines, its own line on a tab over the box's corner.
+    ListVerticalBox,
+    /// Columns: the item's line in a header, its lines as bullets in a light box below.
+    ListHorizontalBullet,
+    /// Columns: a small square and the item's line over a rule, its lines below after small squares.
+    ListSquareAccent,
+    /// Columns: a tall light card with the item's lines and a circle with its own line over its top.
+    ListStacked,
+    /// Rows: the item's line in a block, its lines in a light block beside it.
+    ListVerticalBlock,
+    /// Rows: the item's line in an arrow pointing into a light box with its lines.
+    ListVerticalArrow,
+    /// Quarter rings in the lower left corner; each item's text in a row to the right, joined to its ring.
+    ListTarget,
+    /// A line down the left with a circle per item, the item's text beside its circle over a rule.
+    ListVerticalCircle,
+    /// Centred bars stacked, each as wide as its text needs.
+    ListVaryingWidth,
+    /// Rows: the item's line on the left, its lines on the right, a rule under each with a tab at its start.
+    ListTab,
+    /// A curve down the left with a circle per item and a light bar beside it holding the item's text.
+    ListCurved,
+    /// Columns: the item's line in a block over a light box with its lines, arrows between.
+    ProcessAccent,
+    /// Blocks in a row with arrows between, each item's lines above and below in turn.
+    ProcessAlternatingFlow,
+    /// A flat-backed arrow then chevrons, nested point to notch, each item's text inside.
+    ChevronsClosed,
+    /// Light chevrons in a row with the item's line inside and its lines below.
+    ChevronsDetailed,
+    /// Circles in a row with arrows between, each item's lines under its circle.
+    ProcessCircle,
+    /// Rows: each top item's bar, the items under it as boxes below it, arrows down between rows.
+    ProcessSegmented,
+    /// Blocks in rows that turn back at each end, arrows between.
+    ProcessSnake,
+    /// Blocks in columns, down then up, arrows between.
+    ProcessBendingVertical,
+    /// Circles stepping down to the right, joined by elbow lines, each item's lines beside its circle.
+    StepDown,
+    /// Stacked arrows to the right edge, each starting a column later; each item's lines in its column below.
+    ProcessIncreasingArrows,
+    /// One wide arrow across, each item's text in a section of it.
+    ProcessContinuousArrow,
+    /// Columns: each top item in a header with arrows between, the items under it as boxes below.
+    ProcessList,
+    /// Dots along a falling arrow, each item's text beside its dot.
+    ArrowDownward,
+    /// Rows: a ring on the left filled further each row, the item's text beside it.
+    ProcessCirclesIncreasing,
+    /// Blocks round a circle with curved arrows between.
+    CycleBlock,
+    /// Circles on a ring, each item's text inside its circle.
+    CycleNondirectional,
+    /// A circle cut into wedges, each item's text in its wedge.
+    CyclePie,
+    /// The first item in a large hexagon, the items under it in hexagons round it.
+    CycleHexagonRadial,
+    /// An organization chart whose items sit inside half rings.
+    OrgChartHalfCircle,
+    /// A tree from the top over a band per level; later top items with nothing under them name the bands.
+    HierarchyLabeled,
+    /// A tree from the left over a column per level; later top items with nothing under them name the columns.
+    HierarchyLabeledHorizontal,
+    /// Blocks stacked from the bottom, each as wide as the items above it.
+    HierarchyArchitecture,
+    /// Blocks in a column per level from the left, each as tall as the items beside it.
+    HierarchyTableHorizontal,
+    /// Arrows pointing in to the middle from both sides, each item's text inside.
+    ArrowsConverging,
+    /// Arrows pointing out from the middle to both sides, each item's text inside.
+    ArrowsDiverging,
+    /// Wide arrows stacked, pointing right and left in turn, each item's text inside.
+    ArrowsCounterbalance,
+    /// The first item in a large circle, the items under it in see-through circles over its edge.
+    VennRadial,
+    /// See-through circles inside each other on one bottom point, each item's text at the top of its band.
+    VennStacked,
+    /// Rounded rectangles inside each other, each item's text at the top of its band.
+    TargetNested,
+    /// The first item in a large circle, the items under it in small circles round its edge.
+    CircleRelationship,
+    /// Columns under a plus and a minus sign in turn, each item's text in a box under its sign.
+    PlusMinus,
+    /// Rows: the items under each top item in boxes, arrows pointing into a circle with the top item.
+    TextConverging,
+    /// The first item in a large circle, the items under it in small circles on an arc beside it.
+    RadialList,
+    /// Circles top to bottom joined by plus signs, an arrow to the last item in a larger circle.
+    EquationVertical,
+    /// Thick rings linked in a row, each item's text inside its ring.
+    RingsInterconnected,
+    /// The first item in a block, the items under it in smaller blocks round it, joined by lines.
+    RadialCluster,
+    /// The items under the first on an arc above, arrows pointing down to the first item.
+    RadialConverging,
+    /// A line with a large circle per top item and small circles for the items under it.
+    TimelineCircleAccent,
 }
 
 impl SmartArtLayout {
-    pub const ALL: [SmartArtLayout; 73] = [
+    pub const ALL: [SmartArtLayout; 123] = [
         SmartArtLayout::BasicList,
         SmartArtLayout::Process,
         SmartArtLayout::Cycle,
@@ -247,6 +347,56 @@ impl SmartArtLayout {
         SmartArtLayout::ListTrapezoid,
         SmartArtLayout::ListDescending,
         SmartArtLayout::ListTable,
+        SmartArtLayout::ListHexagonAlternating,
+        SmartArtLayout::ListVerticalBox,
+        SmartArtLayout::ListHorizontalBullet,
+        SmartArtLayout::ListSquareAccent,
+        SmartArtLayout::ListStacked,
+        SmartArtLayout::ListVerticalBlock,
+        SmartArtLayout::ListVerticalArrow,
+        SmartArtLayout::ListTarget,
+        SmartArtLayout::ListVerticalCircle,
+        SmartArtLayout::ListVaryingWidth,
+        SmartArtLayout::ListTab,
+        SmartArtLayout::ListCurved,
+        SmartArtLayout::ProcessAccent,
+        SmartArtLayout::ProcessAlternatingFlow,
+        SmartArtLayout::ChevronsClosed,
+        SmartArtLayout::ChevronsDetailed,
+        SmartArtLayout::ProcessCircle,
+        SmartArtLayout::ProcessSegmented,
+        SmartArtLayout::ProcessSnake,
+        SmartArtLayout::ProcessBendingVertical,
+        SmartArtLayout::StepDown,
+        SmartArtLayout::ProcessIncreasingArrows,
+        SmartArtLayout::ProcessContinuousArrow,
+        SmartArtLayout::ProcessList,
+        SmartArtLayout::ArrowDownward,
+        SmartArtLayout::ProcessCirclesIncreasing,
+        SmartArtLayout::CycleBlock,
+        SmartArtLayout::CycleNondirectional,
+        SmartArtLayout::CyclePie,
+        SmartArtLayout::CycleHexagonRadial,
+        SmartArtLayout::OrgChartHalfCircle,
+        SmartArtLayout::HierarchyLabeled,
+        SmartArtLayout::HierarchyLabeledHorizontal,
+        SmartArtLayout::HierarchyArchitecture,
+        SmartArtLayout::HierarchyTableHorizontal,
+        SmartArtLayout::ArrowsConverging,
+        SmartArtLayout::ArrowsDiverging,
+        SmartArtLayout::ArrowsCounterbalance,
+        SmartArtLayout::VennRadial,
+        SmartArtLayout::VennStacked,
+        SmartArtLayout::TargetNested,
+        SmartArtLayout::CircleRelationship,
+        SmartArtLayout::PlusMinus,
+        SmartArtLayout::TextConverging,
+        SmartArtLayout::RadialList,
+        SmartArtLayout::EquationVertical,
+        SmartArtLayout::RingsInterconnected,
+        SmartArtLayout::RadialCluster,
+        SmartArtLayout::RadialConverging,
+        SmartArtLayout::TimelineCircleAccent,
     ];
 
     /// The id commands use (`basicList`, `process`…).
@@ -325,6 +475,56 @@ impl SmartArtLayout {
             SmartArtLayout::ListTrapezoid => "listTrapezoid",
             SmartArtLayout::ListDescending => "listDescending",
             SmartArtLayout::ListTable => "listTable",
+            SmartArtLayout::ListHexagonAlternating => "listHexagonAlternating",
+            SmartArtLayout::ListVerticalBox => "listVerticalBox",
+            SmartArtLayout::ListHorizontalBullet => "listHorizontalBullet",
+            SmartArtLayout::ListSquareAccent => "listSquareAccent",
+            SmartArtLayout::ListStacked => "listStacked",
+            SmartArtLayout::ListVerticalBlock => "listVerticalBlock",
+            SmartArtLayout::ListVerticalArrow => "listVerticalArrow",
+            SmartArtLayout::ListTarget => "listTarget",
+            SmartArtLayout::ListVerticalCircle => "listVerticalCircle",
+            SmartArtLayout::ListVaryingWidth => "listVaryingWidth",
+            SmartArtLayout::ListTab => "listTab",
+            SmartArtLayout::ListCurved => "listCurved",
+            SmartArtLayout::ProcessAccent => "processAccent",
+            SmartArtLayout::ProcessAlternatingFlow => "processAlternatingFlow",
+            SmartArtLayout::ChevronsClosed => "chevronsClosed",
+            SmartArtLayout::ChevronsDetailed => "chevronsDetailed",
+            SmartArtLayout::ProcessCircle => "processCircle",
+            SmartArtLayout::ProcessSegmented => "processSegmented",
+            SmartArtLayout::ProcessSnake => "processSnake",
+            SmartArtLayout::ProcessBendingVertical => "processBendingVertical",
+            SmartArtLayout::StepDown => "stepDown",
+            SmartArtLayout::ProcessIncreasingArrows => "processIncreasingArrows",
+            SmartArtLayout::ProcessContinuousArrow => "processContinuousArrow",
+            SmartArtLayout::ProcessList => "processList",
+            SmartArtLayout::ArrowDownward => "arrowDownward",
+            SmartArtLayout::ProcessCirclesIncreasing => "processCirclesIncreasing",
+            SmartArtLayout::CycleBlock => "cycleBlock",
+            SmartArtLayout::CycleNondirectional => "cycleNondirectional",
+            SmartArtLayout::CyclePie => "cyclePie",
+            SmartArtLayout::CycleHexagonRadial => "cycleHexagonRadial",
+            SmartArtLayout::OrgChartHalfCircle => "orgChartHalfCircle",
+            SmartArtLayout::HierarchyLabeled => "hierarchyLabeled",
+            SmartArtLayout::HierarchyLabeledHorizontal => "hierarchyLabeledHorizontal",
+            SmartArtLayout::HierarchyArchitecture => "hierarchyArchitecture",
+            SmartArtLayout::HierarchyTableHorizontal => "hierarchyTableHorizontal",
+            SmartArtLayout::ArrowsConverging => "arrowsConverging",
+            SmartArtLayout::ArrowsDiverging => "arrowsDiverging",
+            SmartArtLayout::ArrowsCounterbalance => "arrowsCounterbalance",
+            SmartArtLayout::VennRadial => "vennRadial",
+            SmartArtLayout::VennStacked => "vennStacked",
+            SmartArtLayout::TargetNested => "targetNested",
+            SmartArtLayout::CircleRelationship => "circleRelationship",
+            SmartArtLayout::PlusMinus => "plusMinus",
+            SmartArtLayout::TextConverging => "textConverging",
+            SmartArtLayout::RadialList => "radialList",
+            SmartArtLayout::EquationVertical => "equationVertical",
+            SmartArtLayout::RingsInterconnected => "ringsInterconnected",
+            SmartArtLayout::RadialCluster => "radialCluster",
+            SmartArtLayout::RadialConverging => "radialConverging",
+            SmartArtLayout::TimelineCircleAccent => "timelineCircleAccent",
         }
     }
 
@@ -414,6 +614,56 @@ impl SmartArtLayout {
             SmartArtLayout::ListTrapezoid => "Trapezoid List",
             SmartArtLayout::ListDescending => "Descending Blocks",
             SmartArtLayout::ListTable => "Table List",
+            SmartArtLayout::ListHexagonAlternating => "Alternating Hexagons",
+            SmartArtLayout::ListVerticalBox => "Vertical Box List",
+            SmartArtLayout::ListHorizontalBullet => "Horizontal Bullet List",
+            SmartArtLayout::ListSquareAccent => "Square Accent List",
+            SmartArtLayout::ListStacked => "Stacked List",
+            SmartArtLayout::ListVerticalBlock => "Vertical Block List",
+            SmartArtLayout::ListVerticalArrow => "Vertical Arrow List",
+            SmartArtLayout::ListTarget => "Target List",
+            SmartArtLayout::ListVerticalCircle => "Vertical Circle List",
+            SmartArtLayout::ListVaryingWidth => "Varying Width List",
+            SmartArtLayout::ListTab => "Tab List",
+            SmartArtLayout::ListCurved => "Vertical Curved List",
+            SmartArtLayout::ProcessAccent => "Accent Process",
+            SmartArtLayout::ProcessAlternatingFlow => "Alternating Flow",
+            SmartArtLayout::ChevronsClosed => "Closed Chevron Process",
+            SmartArtLayout::ChevronsDetailed => "Basic Chevron Process",
+            SmartArtLayout::ProcessCircle => "Circle Process",
+            SmartArtLayout::ProcessSegmented => "Segmented Process",
+            SmartArtLayout::ProcessSnake => "Snaking Process",
+            SmartArtLayout::ProcessBendingVertical => "Vertical Bending Process",
+            SmartArtLayout::StepDown => "Step Down Process",
+            SmartArtLayout::ProcessIncreasingArrows => "Increasing Arrows Process",
+            SmartArtLayout::ProcessContinuousArrow => "Continuous Arrow Process",
+            SmartArtLayout::ProcessList => "Process List",
+            SmartArtLayout::ArrowDownward => "Downward Arrow",
+            SmartArtLayout::ProcessCirclesIncreasing => "Increasing Circle Process",
+            SmartArtLayout::CycleBlock => "Block Cycle",
+            SmartArtLayout::CycleNondirectional => "Nondirectional Cycle",
+            SmartArtLayout::CyclePie => "Basic Pie",
+            SmartArtLayout::CycleHexagonRadial => "Hexagon Radial",
+            SmartArtLayout::OrgChartHalfCircle => "Half Circle Organization Chart",
+            SmartArtLayout::HierarchyLabeled => "Labeled Hierarchy",
+            SmartArtLayout::HierarchyLabeledHorizontal => "Horizontal Labeled Hierarchy",
+            SmartArtLayout::HierarchyArchitecture => "Architecture Layout",
+            SmartArtLayout::HierarchyTableHorizontal => "Horizontal Multi-Level Hierarchy",
+            SmartArtLayout::ArrowsConverging => "Converging Arrows",
+            SmartArtLayout::ArrowsDiverging => "Diverging Arrows",
+            SmartArtLayout::ArrowsCounterbalance => "Counterbalance Arrows",
+            SmartArtLayout::VennRadial => "Radial Venn",
+            SmartArtLayout::VennStacked => "Stacked Venn",
+            SmartArtLayout::TargetNested => "Nested Target",
+            SmartArtLayout::CircleRelationship => "Circle Relationship",
+            SmartArtLayout::PlusMinus => "Plus and Minus",
+            SmartArtLayout::TextConverging => "Converging Text",
+            SmartArtLayout::RadialList => "Radial List",
+            SmartArtLayout::EquationVertical => "Vertical Equation",
+            SmartArtLayout::RingsInterconnected => "Interconnected Rings",
+            SmartArtLayout::RadialCluster => "Radial Cluster",
+            SmartArtLayout::RadialConverging => "Converging Radial",
+            SmartArtLayout::TimelineCircleAccent => "Circle Accent Timeline",
         }
     }
 
@@ -486,6 +736,55 @@ impl SmartArtLayout {
             | SmartArtLayout::ListTrapezoid
             | SmartArtLayout::ListDescending
             | SmartArtLayout::ListTable => "List",
+            SmartArtLayout::ListHexagonAlternating
+            | SmartArtLayout::ListVerticalBox
+            | SmartArtLayout::ListHorizontalBullet
+            | SmartArtLayout::ListSquareAccent
+            | SmartArtLayout::ListStacked
+            | SmartArtLayout::ListVerticalBlock
+            | SmartArtLayout::ListVerticalArrow
+            | SmartArtLayout::ListTarget
+            | SmartArtLayout::ListVerticalCircle
+            | SmartArtLayout::ListVaryingWidth
+            | SmartArtLayout::ListTab
+            | SmartArtLayout::ListCurved => "List",
+            SmartArtLayout::ProcessAccent
+            | SmartArtLayout::ProcessAlternatingFlow
+            | SmartArtLayout::ChevronsClosed
+            | SmartArtLayout::ChevronsDetailed
+            | SmartArtLayout::ProcessCircle
+            | SmartArtLayout::ProcessSegmented
+            | SmartArtLayout::ProcessSnake
+            | SmartArtLayout::ProcessBendingVertical
+            | SmartArtLayout::StepDown
+            | SmartArtLayout::ProcessIncreasingArrows
+            | SmartArtLayout::ProcessContinuousArrow
+            | SmartArtLayout::ProcessList
+            | SmartArtLayout::ArrowDownward
+            | SmartArtLayout::ProcessCirclesIncreasing => "Process",
+            SmartArtLayout::CycleBlock | SmartArtLayout::CycleNondirectional | SmartArtLayout::CyclePie | SmartArtLayout::CycleHexagonRadial => {
+                "Cycle"
+            }
+            SmartArtLayout::OrgChartHalfCircle
+            | SmartArtLayout::HierarchyLabeled
+            | SmartArtLayout::HierarchyLabeledHorizontal
+            | SmartArtLayout::HierarchyArchitecture
+            | SmartArtLayout::HierarchyTableHorizontal => "Hierarchy",
+            SmartArtLayout::ArrowsConverging
+            | SmartArtLayout::ArrowsDiverging
+            | SmartArtLayout::ArrowsCounterbalance
+            | SmartArtLayout::VennRadial
+            | SmartArtLayout::VennStacked
+            | SmartArtLayout::TargetNested
+            | SmartArtLayout::CircleRelationship
+            | SmartArtLayout::PlusMinus
+            | SmartArtLayout::TextConverging
+            | SmartArtLayout::RadialList
+            | SmartArtLayout::EquationVertical
+            | SmartArtLayout::RingsInterconnected
+            | SmartArtLayout::RadialCluster
+            | SmartArtLayout::RadialConverging => "Relationship",
+            SmartArtLayout::TimelineCircleAccent => "Timeline",
         }
     }
 
@@ -565,6 +864,56 @@ impl SmartArtLayout {
             SmartArtLayout::ListTrapezoid => "Shows items side by side as trapezoids.",
             SmartArtLayout::ListDescending => "Shows items in order of size, the largest first.",
             SmartArtLayout::ListTable => "Shows a heading over items side by side.",
+            SmartArtLayout::ListHexagonAlternating => "Shows items and their details as hexagons in a zigzag.",
+            SmartArtLayout::ListVerticalBox => "Shows headed groups of text as boxes with a tab.",
+            SmartArtLayout::ListHorizontalBullet => "Shows headed groups of bullets side by side.",
+            SmartArtLayout::ListSquareAccent => "Shows headed groups of text with square markers.",
+            SmartArtLayout::ListStacked => "Shows groups of text under circled headings.",
+            SmartArtLayout::ListVerticalBlock => "Shows groups of text as blocks beside their heading.",
+            SmartArtLayout::ListVerticalArrow => "Shows headings that point to their details.",
+            SmartArtLayout::ListTarget => "Shows layers from the outside in with text beside each.",
+            SmartArtLayout::ListVerticalCircle => "Shows items in order down a line of circles.",
+            SmartArtLayout::ListVaryingWidth => "Shows items as centred bars that fit their text.",
+            SmartArtLayout::ListTab => "Shows headings with their details as ruled rows.",
+            SmartArtLayout::ListCurved => "Shows items along a curve.",
+            SmartArtLayout::ProcessAccent => "Shows steps in order with details under each.",
+            SmartArtLayout::ProcessAlternatingFlow => "Shows steps in order with details above and below in turn.",
+            SmartArtLayout::ChevronsClosed => "Shows steps in order from a starting point.",
+            SmartArtLayout::ChevronsDetailed => "Shows steps in order as chevrons with details below.",
+            SmartArtLayout::ProcessCircle => "Shows steps in order as circles.",
+            SmartArtLayout::ProcessSegmented => "Shows steps in order, each split into its parts.",
+            SmartArtLayout::ProcessSnake => "Shows many steps in rows that wind back and forth.",
+            SmartArtLayout::ProcessBendingVertical => "Shows many steps in columns that wind down and up.",
+            SmartArtLayout::StepDown => "Shows steps that lead down one after another.",
+            SmartArtLayout::ProcessIncreasingArrows => "Shows stages that start in turn and run on.",
+            SmartArtLayout::ProcessContinuousArrow => "Shows steps along one continuous arrow.",
+            SmartArtLayout::ProcessList => "Shows steps in order, each with its tasks listed.",
+            SmartArtLayout::ArrowDownward => "Shows decline or steps down along a falling arrow.",
+            SmartArtLayout::ProcessCirclesIncreasing => "Shows progress that builds up step by step.",
+            SmartArtLayout::CycleBlock => "Shows steps that repeat as blocks joined by curved arrows.",
+            SmartArtLayout::CycleNondirectional => "Shows parts of a cycle with no set direction.",
+            SmartArtLayout::CyclePie => "Shows parts of a whole as slices of a pie.",
+            SmartArtLayout::CycleHexagonRadial => "Shows items round a central idea as hexagons.",
+            SmartArtLayout::OrgChartHalfCircle => "Shows an organisation with each person in open rings.",
+            SmartArtLayout::HierarchyLabeled => "Shows a tree with a named band for each level.",
+            SmartArtLayout::HierarchyLabeledHorizontal => "Shows a tree from left to right with a named column per level.",
+            SmartArtLayout::HierarchyArchitecture => "Shows layers that build on each other, the base at the bottom.",
+            SmartArtLayout::HierarchyTableHorizontal => "Shows a tree from left to right as stacked blocks.",
+            SmartArtLayout::ArrowsConverging => "Shows ideas that come together.",
+            SmartArtLayout::ArrowsDiverging => "Shows ideas that move apart.",
+            SmartArtLayout::ArrowsCounterbalance => "Shows two forces that balance each other.",
+            SmartArtLayout::VennRadial => "Shows ideas that overlap a central one.",
+            SmartArtLayout::VennStacked => "Shows parts that grow from one another.",
+            SmartArtLayout::TargetNested => "Shows layers inside each other.",
+            SmartArtLayout::CircleRelationship => "Shows parts that belong to a whole.",
+            SmartArtLayout::PlusMinus => "Shows the pros and cons of an idea.",
+            SmartArtLayout::TextConverging => "Shows parts that combine into one result.",
+            SmartArtLayout::RadialList => "Shows items that come from a central idea.",
+            SmartArtLayout::EquationVertical => "Shows parts that add up to a result, top to bottom.",
+            SmartArtLayout::RingsInterconnected => "Shows ideas that link together.",
+            SmartArtLayout::RadialCluster => "Shows ideas linked to a central one.",
+            SmartArtLayout::RadialConverging => "Shows ideas that lead to a central one.",
+            SmartArtLayout::TimelineCircleAccent => "Shows events in time with the steps of each.",
         }
     }
     /// Whether items under a top item are drawn as shapes of their own (trees, a centre with
@@ -584,6 +933,21 @@ impl SmartArtLayout {
                 | SmartArtLayout::LinedList
                 | SmartArtLayout::CycleRadial
                 | SmartArtLayout::ListGrouped
+                | SmartArtLayout::ProcessSegmented
+                | SmartArtLayout::ProcessList
+                | SmartArtLayout::CycleHexagonRadial
+                | SmartArtLayout::OrgChartHalfCircle
+                | SmartArtLayout::HierarchyLabeled
+                | SmartArtLayout::HierarchyLabeledHorizontal
+                | SmartArtLayout::HierarchyArchitecture
+                | SmartArtLayout::HierarchyTableHorizontal
+                | SmartArtLayout::VennRadial
+                | SmartArtLayout::CircleRelationship
+                | SmartArtLayout::TextConverging
+                | SmartArtLayout::RadialList
+                | SmartArtLayout::RadialCluster
+                | SmartArtLayout::RadialConverging
+                | SmartArtLayout::TimelineCircleAccent
         )
     }
 }
@@ -794,6 +1158,76 @@ impl SmartArtSpec {
             }
             SmartArtLayout::ListDescending => items(&[("Most", 0), ("More", 0), ("Some", 0), ("Few", 0)]),
             SmartArtLayout::ListTable => items(&[("Project", 0), ("Plan", 0), ("Goals", 1), ("Build", 0), ("Draft", 1), ("Ship", 0), ("Release", 1)]),
+            SmartArtLayout::ListHexagonAlternating
+            | SmartArtLayout::ListVerticalBox
+            | SmartArtLayout::ListHorizontalBullet
+            | SmartArtLayout::ListSquareAccent
+            | SmartArtLayout::ListStacked
+            | SmartArtLayout::ListVerticalBlock
+            | SmartArtLayout::ListVerticalArrow
+            | SmartArtLayout::ListTarget
+            | SmartArtLayout::ListVerticalCircle
+            | SmartArtLayout::ListTab => with_lines(&[("Idea", "Why it matters"), ("Plan", "How we get there"), ("Result", "What changes")]),
+            SmartArtLayout::ListVaryingWidth | SmartArtLayout::ListCurved => {
+                items(&[("Ideas", 0), ("Notes", 0), ("Drafts", 0), ("Edits", 0), ("Final", 0)])
+            }
+            SmartArtLayout::ProcessAccent
+            | SmartArtLayout::ProcessAlternatingFlow
+            | SmartArtLayout::ChevronsDetailed
+            | SmartArtLayout::ProcessCircle
+            | SmartArtLayout::StepDown
+            | SmartArtLayout::ProcessIncreasingArrows
+            | SmartArtLayout::ArrowDownward
+            | SmartArtLayout::ProcessCirclesIncreasing => {
+                items(&[("Plan", 0), ("Set goals", 1), ("Build", 0), ("Make it", 1), ("Ship", 0), ("Release", 1)])
+            }
+            SmartArtLayout::ChevronsClosed
+            | SmartArtLayout::ProcessContinuousArrow
+            | SmartArtLayout::CycleBlock
+            | SmartArtLayout::CycleNondirectional
+            | SmartArtLayout::CyclePie => items(&[("Plan", 0), ("Build", 0), ("Test", 0), ("Ship", 0)]),
+            SmartArtLayout::ProcessSegmented | SmartArtLayout::ProcessList => {
+                items(&[("Design", 0), ("Sketches", 1), ("Mockups", 1), ("Build", 0), ("Code", 1), ("Tests", 1), ("Launch", 0), ("Release", 1)])
+            }
+            SmartArtLayout::ProcessSnake | SmartArtLayout::ProcessBendingVertical => {
+                items(&[("Idea", 0), ("Sketch", 0), ("Draft", 0), ("Review", 0), ("Fix", 0), ("Ship", 0)])
+            }
+            SmartArtLayout::CycleHexagonRadial
+            | SmartArtLayout::VennRadial
+            | SmartArtLayout::CircleRelationship
+            | SmartArtLayout::RadialList
+            | SmartArtLayout::RadialCluster
+            | SmartArtLayout::RadialConverging => items(&[("Goal", 0), ("Plan", 1), ("Build", 1), ("Test", 1), ("Ship", 1)]),
+            SmartArtLayout::OrgChartHalfCircle => {
+                items(&[("Lead", 0), ("Design", 1), ("Sketches", 2), ("Mockups", 2), ("Build", 1), ("Code", 2), ("Tests", 2)])
+            }
+            SmartArtLayout::HierarchyLabeled | SmartArtLayout::HierarchyLabeledHorizontal => items(&[
+                ("Lead", 0),
+                ("Design", 1),
+                ("Sketches", 2),
+                ("Build", 1),
+                ("Code", 2),
+                ("Tests", 2),
+                ("Leadership", 0),
+                ("Teams", 0),
+                ("Work", 0),
+            ]),
+            SmartArtLayout::HierarchyArchitecture | SmartArtLayout::HierarchyTableHorizontal => {
+                items(&[("Lead", 0), ("Design", 1), ("Sketches", 2), ("Build", 1), ("Code", 2), ("Tests", 2)])
+            }
+            SmartArtLayout::ArrowsConverging | SmartArtLayout::ArrowsDiverging => {
+                with_lines(&[("Skills", "What we have"), ("Needs", "What customers want")])
+            }
+            SmartArtLayout::ArrowsCounterbalance => with_lines(&[("Rise", "More users"), ("Fall", "Lower costs")]),
+            SmartArtLayout::VennStacked => items(&[("Vision", 0), ("Strategy", 0), ("Tasks", 0)]),
+            SmartArtLayout::TargetNested => items(&[("Vision", 0), ("Goals", 0), ("Tasks", 0)]),
+            SmartArtLayout::PlusMinus => items(&[("Pros", 0), ("Faster", 1), ("Cheaper", 1), ("Cons", 0), ("Riskier", 1)]),
+            SmartArtLayout::TextConverging => items(&[("Product", 0), ("Ideas", 1), ("Research", 1), ("Tests", 1)]),
+            SmartArtLayout::EquationVertical => items(&[("Idea", 0), ("Work", 0), ("Result", 0)]),
+            SmartArtLayout::RingsInterconnected => items(&[("Design", 0), ("Build", 0), ("Test", 0)]),
+            SmartArtLayout::TimelineCircleAccent => {
+                with_lines(&[("Kickoff", "Goals agreed"), ("Design", "First sketches"), ("Build", "Working draft"), ("Launch", "Out to everyone")])
+            }
         };
         SmartArtSpec { layout, items, colors: SmartArtColors::default() }
     }
