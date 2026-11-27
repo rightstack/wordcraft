@@ -396,6 +396,7 @@ fn check_formatting(s: &Session, id: &str, params: &Value) -> Result<(), CmdErro
             "edit.pasteFormat"
                 | "table.shading"
                 | "table.borders"
+                | "table.cellBorders"
                 | "table.borderPainter"
                 | "table.cellAlign"
                 | "table.cellMargins"

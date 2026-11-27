@@ -9,6 +9,7 @@ use wordcraft_doc::{Block, Document, InlineObject, Paragraph, Path, Pos, Revisio
 use super::sel_result;
 use crate::{CmdError, CmdResult, CommandSpec, Selection, Session, p};
 
+mod cell_borders;
 mod cells;
 mod clear;
 mod convert;
@@ -16,6 +17,7 @@ mod layout;
 mod select;
 mod structure;
 
+pub use cell_borders::cell_borders_state;
 pub(super) use cells::grid_cols;
 pub use cells::selected_cells;
 use cells::{cell, with_cells, with_table};
@@ -96,9 +98,44 @@ pub fn specs() -> Vec<CommandSpec> {
             with_cells(s, |cl| cl.props.shading = c)
         })
         .params(r#"{"color": "RRGGBB" | null}"#)),
-        t(CommandSpec::new("table.borders", "Borders", "Table Design › Borders", borders)
-            .params(r#"{"kind": "all|outside|inside|none|top|bottom|left|right", "width"?: pt, "color"?: "RRGGBB"}"#)),
+        t(CommandSpec::new("table.borders", "Borders", "Table Design › Borders", borders).params(
+            r#"{"kind": "all|outside|inside|none|top|bottom|left|right", "style"?: "single|dotted|dashed|dotDash|double|triple|thick|wave", "width"?: pt, "color"?: "RRGGBB"}"#,
+        )),
+        t(CommandSpec::new("table.cellBorders", "Cell Borders", "Table Design › Borders", cell_borders::cell_borders).params(
+            r#"{"kind": "all|outside|inside|top|bottom|left|right|none|restyle", "on"?: bool (true; false clears those sides), "style"?: "single|dotted|dashed|dotDash|double|triple|thick|wave" (single), "width"?: pt (0.5), "color"?: "RRGGBB"|null (automatic)} (the selected cells, or the caret's; a side's neighbour gets the same line; restyle gives the lines that show the given style, width or colour, keeping the rest; returns the cells' border state)"#,
+        )),
         t(CommandSpec::new("table.cellAlign", "Alignment", "Table Layout › Alignment", |s, v| {
+            // Horizontal or vertical alone, keeping the other (a toolbar's align menus).
+            let h = match p::str(v, "h") {
+                None => None,
+                Some("left") => Some(Align::Left),
+                Some("center") => Some(Align::Center),
+                Some("right") => Some(Align::Right),
+                Some("justify") => Some(Align::Justify),
+                Some(x) => return Err(CmdError::Params(format!("unknown alignment `{x}`"))),
+            };
+            let va = match p::str(v, "v") {
+                None => None,
+                Some("top") => Some(VAlign::Top),
+                Some("center") => Some(VAlign::Center),
+                Some("bottom") => Some(VAlign::Bottom),
+                Some(x) => return Err(CmdError::Params(format!("unknown vertical alignment `{x}`"))),
+            };
+            if p::str(v, "value").is_none() && (h.is_some() || va.is_some()) {
+                return with_cells(s, |cl| {
+                    if let Some(va) = va {
+                        cl.props.valign = Some(va);
+                    }
+                    if let Some(h) = h {
+                        for b in &mut cl.blocks {
+                            if let Block::Para(p) = std::sync::Arc::make_mut(b) {
+                                p.props.align = Some(h);
+                                p.touch();
+                            }
+                        }
+                    }
+                });
+            }
             let (h, va) = match p::str(v, "value").unwrap_or("topLeft") {
                 "topLeft" => (Align::Left, VAlign::Top),
                 "topCenter" => (Align::Center, VAlign::Top),
@@ -121,7 +158,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
             })
         })
-        .params(r#"{"value": "topLeft|topCenter|…|bottomRight"}"#)),
+        .params(r#"{"value"?: "topLeft|topCenter|…|bottomRight" (topLeft)} | {"h"?: "left|center|right|justify", "v"?: "top|center|bottom"} (h or v alone keeps the other)"#)),
         t(CommandSpec::new("table.textDirection", "Text Direction", "Table Layout › Alignment", text_direction)
             .params(r#"{"value"?: "horizontal|down|up"} (default: the next direction after the caret cell's, like Word's button)"#)),
         t(CommandSpec::new("table.autofit", "AutoFit", "Table Layout › Cell Size", autofit).params(r#"{"mode": "contents|window|fixed"}"#)),

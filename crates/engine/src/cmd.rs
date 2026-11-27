@@ -146,6 +146,24 @@ pub fn selected_paths(s: &Session) -> Vec<wordcraft_doc::Path> {
     {
         return segs.iter().map(|(a, _)| a.path.clone()).collect();
     }
+    // Whole cells that are one run of the text (whole rows, cells of a row): every paragraph in
+    // them. The stream selection ends at the start of the last cell's paragraph when that cell
+    // is empty, and the rule that leaves out a paragraph a selection only reaches the start of
+    // (#418) would drop that cell.
+    if let Some(range) = s.cell_range()
+        && let Some(t) = s.doc.table(range.story, &range.table)
+    {
+        let prefixes: Vec<Vec<u32>> = range
+            .cells(t)
+            .into_iter()
+            .filter_map(|(r, c)| {
+                let mut q = range.table.0.clone();
+                q.extend([u32::try_from(r).ok()?, u32::try_from(c).ok()?]);
+                Some(q)
+            })
+            .collect();
+        return s.doc.para_paths(range.story).into_iter().filter(|p| prefixes.iter().any(|q| p.0.len() > q.len() && p.0.starts_with(q))).collect();
+    }
     let (a, b) = s.sel.ordered();
     s.doc.para_paths_in(&a, &b)
 }
