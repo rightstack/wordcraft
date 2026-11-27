@@ -1,0 +1,388 @@
+use super::*;
+use wordcraft_doc::graphic::PathSeg;
+
+fn parse(s: &str) -> El {
+    xml::parse(s.as_bytes()).unwrap()
+}
+
+fn names(e: &El) -> Vec<&str> {
+    e.els().map(|c| c.name.as_str()).collect()
+}
+
+#[test]
+fn every_layout_reads_back_and_draws_inside_its_frame() {
+    for layout in SmartArtLayout::ALL {
+        for colors in [SmartArtColors::Accent3, SmartArtColors::Colorful] {
+            let mut spec = SmartArtSpec::sample(layout);
+            spec.colors = colors;
+            spec.items.push(SmartArtItem::new("Under <last> & more", 1));
+            let spec = spec.sanitized();
+            assert_eq!(spec_of(&parse(&data_xml(&spec, "rId9"))).as_ref(), Some(&spec), "{layout:?}");
+            let items = smart_art_items(&spec, &THEME_COLORS, 400.0, 250.0);
+            assert!(items.iter().any(|i| matches!(i, GraphicItem::Text { .. })), "{layout:?} has text");
+            for it in &items {
+                if let GraphicItem::Shape { rect, .. } = it {
+                    assert!(rect[0] >= -0.5 && rect[1] >= -0.5 && rect[0] + rect[2] <= 400.5 && rect[1] + rect[3] <= 250.5, "{layout:?}: {rect:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn every_top_item_has_a_node_and_picking_its_centre_finds_it() {
+    for layout in SmartArtLayout::ALL {
+        let spec = SmartArtSpec::sample(layout).sanitized();
+        let nodes = smart_art_nodes(&spec, 400.0, 250.0);
+        for (i, it) in spec.items.iter().enumerate() {
+            // Trees, radials and groups draw every item as its own shape; the others draw sub-items as lines.
+            let own = it.level == 0 || layout.children_are_shapes();
+            let node = nodes.iter().find(|n| n.item == i);
+            // Sub-items of the other layouts are lines in their item's text, never their own node.
+            if !own {
+                assert!(node.is_none(), "{layout:?}: sub-item {i} has a node");
+            }
+            if !own {
+                continue;
+            }
+            let n = node.unwrap_or_else(|| panic!("{layout:?}: item {i} has no node"));
+            // The middle of a pyramid's top triangle and of a Venn circle's own label side may be overlapped;
+            // the box centre lies inside its own shape for every preset we draw.
+            let (cx, cy) = (n.b[0] + n.b[2] / 2.0, n.b[1] + n.b[3] / 2.0 + if n.prst == "triangle" { n.b[3] / 4.0 } else { 0.0 });
+            if layout != SmartArtLayout::Venn {
+                assert_eq!(smart_art_item_at(&spec, 400.0, 250.0, cx, cy), Some(i), "{layout:?} item {i} at {cx},{cy}");
+            }
+        }
+        assert_eq!(smart_art_item_at(&spec, 400.0, 250.0, -10.0, -10.0), None, "{layout:?}: outside");
+    }
+}
+
+#[test]
+fn every_shape_box_stays_in_the_frame_and_text_on_light_fills_is_dark() {
+    let mut bad = Vec::new();
+    for layout in SmartArtLayout::ALL {
+        for n in [1usize, 3, 7] {
+            let mut spec = SmartArtSpec::sample(layout);
+            spec.items = (0..n).flat_map(|k| [SmartArtItem::new(format!("Item {k}"), 0), SmartArtItem::new("line", 1)]).collect();
+            let spec = spec.sanitized();
+            for (w, h) in [(432.0, 252.0), (120.0, 300.0), (600.0, 80.0)] {
+                for sh in super::layout(&spec, w, h) {
+                    let [x, y, bw, bh] = sh.b;
+                    if !(x >= -0.5 && y >= -0.5 && x + bw <= w + 0.5 && y + bh <= h + 0.5) {
+                        bad.push(format!("{layout:?} {n} {w}x{h}: {:?} {:?}", sh.prst, sh.b));
+                    }
+                    if !sh.text.is_empty()
+                        && let Paint::Accent(_, Some(t)) = sh.fill
+                        && t < 90_000
+                        && sh.ink == Ink::Light
+                    {
+                        bad.push(format!("{layout:?}: light text on a light fill"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// A light theme whose first accent is a pale yellow (white text on it reads 1.5:1), and a
+/// theme of mid-strength accents.
+const YELLOW_THEME: [Rgb; 12] = [
+    Rgb(0x17, 0x13, 0x1A),
+    Rgb(0xFF, 0xFF, 0xFF),
+    Rgb(0x3A, 0x32, 0x3D),
+    Rgb(0xFD, 0xF4, 0xEA),
+    Rgb(0xFF, 0xD0, 0x2F),
+    Rgb(0x5A, 0xA5, 0xFF),
+    Rgb(0xF9, 0x7A, 0x3A),
+    Rgb(0x62, 0xD2, 0x73),
+    Rgb(0x8E, 0x63, 0xE8),
+    Rgb(0xFF, 0xA8, 0xCC),
+    Rgb(0x00, 0x62, 0xD8),
+    Rgb(0x8E, 0x21, 0xFA),
+];
+const BLUE_THEME: [Rgb; 12] = [
+    Rgb(0, 0, 0),
+    Rgb(0xFF, 0xFF, 0xFF),
+    Rgb(0x44, 0x54, 0x6A),
+    Rgb(0xE7, 0xE6, 0xE6),
+    Rgb(0x44, 0x72, 0xC4),
+    Rgb(0xED, 0x7D, 0x31),
+    Rgb(0xA5, 0xA5, 0xA5),
+    Rgb(0xFF, 0xC0, 0x00),
+    Rgb(0x5B, 0x9B, 0xD5),
+    Rgb(0x70, 0xAD, 0x47),
+    Rgb(0x05, 0x63, 0xC1),
+    Rgb(0x95, 0x4F, 0x72),
+];
+
+/// The box of a drawn shape or path, and its fill.
+fn filled_box(it: &GraphicItem) -> Option<([f32; 4], Rgb)> {
+    match it {
+        GraphicItem::Shape { rect, fill: Some(f), .. } => Some((*rect, *f)),
+        GraphicItem::Path { segs, fill: Some(f), .. } => {
+            let pts: Vec<(f32, f32)> = segs
+                .iter()
+                .filter_map(|s| match *s {
+                    PathSeg::Move(x, y) | PathSeg::Line(x, y) | PathSeg::Cubic(_, _, _, _, x, y) => Some((x, y)),
+                    PathSeg::Close => None,
+                })
+                .collect();
+            let (x0, y0) = pts.iter().fold((f32::MAX, f32::MAX), |(a, b), p| (a.min(p.0), b.min(p.1)));
+            let (x1, y1) = pts.iter().fold((f32::MIN, f32::MIN), |(a, b), p| (a.max(p.0), b.max(p.1)));
+            Some(([x0, y0, x1 - x0, y1 - y0], *f))
+        }
+        _ => None,
+    }
+}
+
+#[test]
+fn every_layouts_text_reads_on_what_is_behind_it_in_any_theme() {
+    // Drawn as the app draws it: each text line against the topmost filled shape drawn before
+    // it under the line's middle, else the white page.
+    let mut bad = Vec::new();
+    for theme in [&YELLOW_THEME[..], &BLUE_THEME[..], &THEME_COLORS[..]] {
+        for layout in SmartArtLayout::ALL {
+            for colors in SmartArtColors::ALL {
+                for n in [3usize, 6] {
+                    let mut spec = SmartArtSpec::sample(layout);
+                    spec.colors = colors;
+                    spec.items = (0..n).flat_map(|k| [SmartArtItem::new(format!("Item {k}"), 0), SmartArtItem::new("line", 1)]).collect();
+                    let spec = spec.sanitized();
+                    let items = smart_art_items(&spec, theme, 432.0, 252.0);
+                    for (k, it) in items.iter().enumerate() {
+                        let GraphicItem::Text { rect, color, text, .. } = it else { continue };
+                        let (cx, cy) = (rect[0] + rect[2] / 2.0, rect[1] + rect[3] / 2.0);
+                        let bg = items[..k]
+                            .iter()
+                            .rev()
+                            .filter_map(filled_box)
+                            .find(|(b, _)| b[0] <= cx && cx <= b[0] + b[2] && b[1] <= cy && cy <= b[1] + b[3])
+                            .map_or(Rgb::WHITE, |(_, f)| f);
+                        let c = contrast(*color, bg);
+                        if c < TEXT_CONTRAST {
+                            bad.push(format!("{layout:?} {colors:?} n={n} theme accent1 {:?}: {text:?} {color:?} on {bg:?} = {c:.2}", theme[4]));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+#[test]
+fn accent_lines_stand_out_from_the_page() {
+    for theme in [&YELLOW_THEME[..], &BLUE_THEME[..]] {
+        for layout in SmartArtLayout::ALL {
+            for colors in SmartArtColors::ALL {
+                let mut spec = SmartArtSpec::sample(layout);
+                spec.colors = colors;
+                let mut shapes = super::layout(&spec.sanitized(), 432.0, 252.0);
+                fit_colours(&mut shapes, theme);
+                for (k, sh) in shapes.iter().enumerate() {
+                    if sh.prst == "line" && sh.line != Paint::None {
+                        let c = paint_rgb(sh.line, theme).unwrap();
+                        let bg = backdrop(&shapes, k, theme);
+                        assert!(contrast(c, bg) >= LINE_CONTRAST, "{layout:?} {colors:?}: {:?} {c:?} on {bg:?}", sh.line);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_pale_accent_gets_dark_text_and_a_strong_one_light_text_in_the_saved_drawing() {
+    let spec = SmartArtSpec { colors: SmartArtColors::Accent1, ..SmartArtSpec::sample(SmartArtLayout::Process) }.sanitized();
+    // The first step is the full accent: dark text on pale yellow, light text on mid blue.
+    let first_run = |theme: &[Rgb]| {
+        let d = parse(&drawing_xml(&spec, theme, 400.0, 200.0));
+        let sp = d.child("dsp:spTree").unwrap().children("dsp:sp").find(|sp| sp.find("a:t").is_some()).unwrap();
+        sp.find("a:rPr").unwrap().find("a:schemeClr").unwrap().attr("val").unwrap().to_string()
+    };
+    assert_eq!(first_run(&YELLOW_THEME), "tx1");
+    assert_eq!(first_run(&BLUE_THEME), "lt1");
+    // Accent numbers on white in a pale accent are written darker (lumMod).
+    let spec = SmartArtSpec { colors: SmartArtColors::Accent1, ..SmartArtSpec::sample(SmartArtLayout::CardBigNumbers) }.sanitized();
+    let x = drawing_xml(&spec, &YELLOW_THEME, 400.0, 200.0);
+    assert!(x.contains("<a:lumMod val="), "{x}");
+}
+
+#[test]
+fn sub_items_of_a_list_are_bullets_without_their_own_node() {
+    let mut spec = SmartArtSpec::sample(SmartArtLayout::BasicList);
+    spec.items.insert(1, SmartArtItem::new("under", 1));
+    let spec = spec.sanitized();
+    let nodes = smart_art_nodes(&spec, 400.0, 250.0);
+    assert!(nodes.iter().all(|n| n.item != 1));
+    assert!(nodes.iter().any(|n| n.item == 0) && nodes.iter().any(|n| n.item == 2));
+}
+
+#[test]
+fn a_diagram_with_more_than_the_model_stays_read_only() {
+    let spec = SmartArtSpec::sample(SmartArtLayout::Process);
+    let x = data_xml(&spec, "rId4");
+    assert_eq!(spec_of(&parse(&x.replace("<dgm:bg/>", "<dgm:bg><a:noFill/></dgm:bg>"))), None);
+    assert_eq!(spec_of(&parse(&x.replace("layout/process1", "layout/process9"))), None);
+    // A run split in two (as another program might save it) isn't ours either.
+    let split = x.replace(
+        "<a:r><a:rPr lang=\"en-US\"/><a:t>Plan</a:t></a:r>",
+        "<a:r><a:rPr lang=\"en-US\"/><a:t>Pl</a:t></a:r><a:r><a:rPr lang=\"en-US\"/><a:t>an</a:t></a:r>",
+    );
+    assert_ne!(split, x);
+    assert_eq!(spec_of(&parse(&split)), None);
+}
+
+#[test]
+fn parts_come_in_schema_order() {
+    let spec = SmartArtSpec::sample(SmartArtLayout::Hierarchy);
+    let data = parse(&data_xml(&spec, "rId1"));
+    assert_eq!(names(&data), ["dgm:ptLst", "dgm:cxnLst", "dgm:bg", "dgm:whole", "dgm:extLst"]);
+    let pt = data.child("dgm:ptLst").unwrap().els().nth(1).unwrap();
+    assert_eq!(names(pt), ["dgm:prSet", "dgm:spPr", "dgm:t"]);
+    // Each item's connection names its parent: Design (item 1) under Lead (item 0).
+    let cx = data.child("dgm:cxnLst").unwrap().els().nth(1).unwrap();
+    assert_eq!(cx.attr("srcId"), Some(model_id(1).as_str()));
+    let drawing = parse(&drawing_xml(&spec, &THEME_COLORS, 300.0, 200.0));
+    let tree = drawing.child("dsp:spTree").unwrap();
+    assert_eq!(names(tree).first(), Some(&"dsp:nvGrpSpPr"));
+    let sp = tree.children("dsp:sp").last().unwrap();
+    assert_eq!(names(sp), ["dsp:nvSpPr", "dsp:spPr", "dsp:style", "dsp:txBody", "dsp:txXfrm"]);
+    assert_eq!(names(sp.child("dsp:spPr").unwrap()), ["a:xfrm", "a:prstGeom", "a:solidFill", "a:ln"]);
+    for part in [layout_xml(SmartArtLayout::Radial), colors_xml(SmartArtColors::Colorful), quick_style_xml()] {
+        let el = parse(&part);
+        assert_eq!(&names(&el)[..3], ["dgm:title", "dgm:desc", "dgm:catLst"]);
+    }
+}
+
+#[test]
+fn hostile_sizes_and_many_items_stay_finite() {
+    let spec = SmartArtSpec { items: (0..MAX_ITEMS).map(|i| SmartArtItem::new("word ".repeat(50), (i % 9) as u8)).collect(), ..Default::default() }
+        .sanitized();
+    for layout in SmartArtLayout::ALL {
+        let spec = SmartArtSpec { layout, ..spec.clone() };
+        for (w, h) in [(f32::NAN, 10.0), (0.0, 0.0), (1.0e30, 5.0), (300.0, 200.0)] {
+            for it in smart_art_items(&spec, &THEME_COLORS, w, h) {
+                if let GraphicItem::Shape { rect, .. } | GraphicItem::Text { rect, .. } = it {
+                    assert!(rect.iter().all(|v| v.is_finite()), "{layout:?} {w} {h}");
+                }
+            }
+        }
+    }
+}
+
+fn tops_spec(layout: SmartArtLayout, n: usize) -> SmartArtSpec {
+    SmartArtSpec { layout, items: (0..n).map(|k| SmartArtItem::new(format!("Item {k}"), 0)).collect(), ..Default::default() }.sanitized()
+}
+
+fn overlap(a: [f32; 4], b: [f32; 4]) -> bool {
+    a[0] < b[0] + b[2] - 0.01 && b[0] < a[0] + a[2] - 0.01 && a[1] < b[1] + b[3] - 0.01 && b[1] < a[1] + a[3] - 0.01
+}
+
+#[test]
+fn wedges_go_round_the_circle_in_turn_and_are_picked_by_their_own_text() {
+    for layout in [SmartArtLayout::MatrixCycle, SmartArtLayout::CycleSegmented] {
+        for n in 2..=7 {
+            let spec = tops_spec(layout, n);
+            let shapes = super::layout(&spec, 432.0, 252.0);
+            let wedges: Vec<&Sh> = shapes.iter().filter(|s| s.prst == "pie").collect();
+            assert_eq!(wedges.len(), n, "{layout:?} {n}");
+            let adj = |s: &Sh, k: &str| s.adj.iter().find(|(name, _)| *name == k).map(|(_, v)| *v).unwrap();
+            // Each wedge starts where the one before ends, and together they make a full turn.
+            let mut sweep = 0;
+            for (k, w) in wedges.iter().enumerate() {
+                let (a, b) = (adj(w, "adj1"), adj(w, "adj2"));
+                sweep += (b - a).rem_euclid(21_600_000);
+                if k > 0 {
+                    assert_eq!(adj(wedges[k - 1], "adj2"), a, "{layout:?} {n}: wedge {k}");
+                }
+                assert_eq!(w.b, wedges[0].b, "{layout:?}: every wedge shares the circle's box");
+            }
+            assert!((sweep - 21_600_000).abs() <= n as i64, "{layout:?} {n}: {sweep}");
+            // Picking: each item's node is its text box inside the circle, none overlapping.
+            let nodes = smart_art_nodes(&spec, 432.0, 252.0);
+            let c = wedges[0].b;
+            for (k, a) in nodes.iter().enumerate() {
+                assert!(
+                    a.b[0] >= c[0] && a.b[1] >= c[1] && a.b[0] + a.b[2] <= c[0] + c[2] && a.b[1] + a.b[3] <= c[1] + c[3],
+                    "{layout:?} {n}: {a:?}"
+                );
+                for b in &nodes[k + 1..] {
+                    assert!(!overlap(a.b, b.b), "{layout:?} {n}: {a:?} {b:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn gears_mesh_without_their_bodies_overlapping() {
+    for n in 1..=6 {
+        let spec = tops_spec(SmartArtLayout::Gears, n);
+        let shapes = super::layout(&spec, 432.0, 252.0);
+        let bodies: Vec<&Sh> = shapes.iter().filter(|s| s.prst == "ellipse").collect();
+        assert_eq!(bodies.len(), n);
+        assert!(bodies.iter().enumerate().all(|(k, b)| b.item == Some(k)), "each gear is its item");
+        // Ten teeth on the large gears, eight on the small, turned to point outwards.
+        assert_eq!(shapes.iter().filter(|s| s.prst == "rect").count(), (0..n).map(|k| if k % 2 == 0 { 10 } else { 8 }).sum::<usize>());
+        let centre = |s: &Sh| (s.b[0] + s.b[2] / 2.0, s.b[1] + s.b[3] / 2.0, s.b[2] / 2.0);
+        for k in 1..n {
+            let ((x0, y0, r0), (x1, y1, r1)) = (centre(bodies[k - 1]), centre(bodies[k]));
+            let d = (x1 - x0).hypot(y1 - y0);
+            assert!(d > r0 + r1, "gears {k}: bodies overlap");
+            // Close enough for the teeth (out to 1/0.82 of the body) to mesh.
+            assert!(d < (r0 + r1) / 0.82, "gears {k}: teeth don't meet");
+        }
+    }
+}
+
+#[test]
+fn a_funnel_takes_the_items_in_at_the_top_and_gives_the_last_out_below() {
+    let spec = tops_spec(SmartArtLayout::Funnel, 4);
+    let shapes = super::layout(&spec, 432.0, 252.0);
+    let funnel = shapes.iter().find(|s| s.prst == "trapezoid").unwrap();
+    assert_eq!(funnel.rot, 180.0, "wide side up");
+    for s in shapes.iter().filter(|s| s.item.is_some()) {
+        if s.item == Some(3) {
+            assert!(s.b[1] >= funnel.b[1] + funnel.b[3], "the result is below the funnel");
+            assert_eq!(s.prst, "roundRect");
+        } else {
+            assert!(s.b[1] + s.b[3] <= funnel.b[1] + 0.01, "the inputs are above it");
+            assert_eq!(s.prst, "ellipse");
+        }
+    }
+}
+
+#[test]
+fn target_rings_are_picked_by_their_own_band() {
+    for n in 1..=6 {
+        let spec = tops_spec(SmartArtLayout::Target, n);
+        let nodes = smart_art_nodes(&spec, 432.0, 252.0);
+        assert_eq!(nodes.len(), n);
+        for (k, a) in nodes.iter().enumerate() {
+            for b in &nodes[k + 1..] {
+                assert!(!overlap(a.b, b.b), "{n}: {a:?} {b:?}");
+            }
+            let (cx, cy) = (a.b[0] + a.b[2] / 2.0, a.b[1] + a.b[3] / 2.0);
+            assert_eq!(smart_art_item_at(&spec, 432.0, 252.0, cx, cy), Some(a.item));
+        }
+    }
+}
+
+#[test]
+fn later_layouts_carry_our_identifier_category_and_walk() {
+    for l in SmartArtLayout::ALL.into_iter().skip(8) {
+        let (id, cat) = layout_id(l);
+        assert_eq!(id, format!("urn:lilyoffice.com/smartart/2026/layout/{}", l.id()));
+        let x = layout_xml(l);
+        assert!(x.contains(&format!("<dgm:cat type=\"{cat}\"")), "{l:?}");
+        if l.category() == "Picture" {
+            assert_eq!(cat, "picture");
+        }
+        // Trees walk the outline as a tree; a centre with items round it names its centre.
+        let tree = x.contains("hierRoot");
+        let centre = x.contains("ctrShpMap");
+        assert_eq!(tree || centre, l.children_are_shapes(), "{l:?}");
+    }
+}

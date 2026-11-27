@@ -14,8 +14,8 @@ use crate::WordApp;
 use crate::theme::{Tokens, c32, regular, semibold};
 
 /// The picker's categories (`All` first), in the order shown.
-pub const CATEGORIES: [&str; 11] =
-    ["All", "List", "Process", "Cycle", "Hierarchy", "Relationship", "Matrix", "Pyramid", "Timeline", "Meet the Team", "Text Cards"];
+pub const CATEGORIES: [&str; 12] =
+    ["All", "List", "Process", "Cycle", "Hierarchy", "Relationship", "Matrix", "Pyramid", "Picture", "Timeline", "Meet the Team", "Text Cards"];
 
 /// Insert › SmartArt: the category shown and the layout picked.
 #[derive(Clone, Debug, Serialize)]
@@ -187,6 +187,87 @@ pub fn preview(p: &Painter, r: Rect, layout: SmartArtLayout, colors: SmartArtCol
                 block(x, 0.05, x + 0.29, 0.05 + head, k, 2.0);
                 p.line_segment([at(x + 0.03, 0.5), at(x + 0.25, 0.5)], thin);
                 p.line_segment([at(x + 0.03, 0.62), at(x + 0.2, 0.62)], thin);
+            }
+        }
+        // Later layouts: a simpler sketch per kind.
+        _ => preview_more(p, c, s, layout, &col, line),
+    }
+}
+
+/// A simpler sketch of the later layouts, one per category.
+fn preview_more(p: &Painter, c: egui::Pos2, s: f32, layout: SmartArtLayout, col: &dyn Fn(usize) -> Color32, line: Color32) {
+    let at = |x: f32, y: f32| pos2(c.x + (x - 0.5) * s, c.y + (y - 0.5) * s);
+    let block = |x0: f32, y0: f32, x1: f32, y1: f32, k: usize, round: f32| p.rect_filled(Rect::from_min_max(at(x0, y0), at(x1, y1)), round, col(k));
+    let thin = Stroke::new(1.0, line);
+    match layout.category() {
+        "Picture" => {
+            for k in 0..3 {
+                let x = 0.02 + 0.33 * k as f32;
+                p.rect_filled(Rect::from_min_max(at(x, 0.15), at(x + 0.29, 0.55)), 2.0, col(k).gamma_multiply(0.35));
+                p.add(egui::Shape::convex_polygon(vec![at(x + 0.08, 0.32), at(x + 0.16, 0.5), at(x + 0.0, 0.5)], col(k), Stroke::NONE));
+                p.circle_filled(at(x + 0.21, 0.26), s * 0.03, col(k));
+                p.line_segment([at(x + 0.04, 0.66), at(x + 0.25, 0.66)], thin);
+            }
+        }
+        "Matrix" => {
+            for k in 0..4 {
+                let (x, y) = ((k % 2) as f32 * 0.5 + 0.03, (k / 2) as f32 * 0.5 + 0.03);
+                block(x, y, x + 0.44, y + 0.44, k, 3.0);
+            }
+            p.circle_filled(c, s * 0.15, Color32::WHITE);
+            p.circle_stroke(c, s * 0.15, Stroke::new(1.0, col(0)));
+        }
+        "Pyramid" => {
+            let down = layout == SmartArtLayout::PyramidInverted;
+            let (top, bottom) = if down { (0.95, 0.05) } else { (0.05, 0.95) };
+            p.add(egui::Shape::convex_polygon(
+                vec![at(0.5, top), at(0.95, bottom), at(0.05, bottom)],
+                col(0).gamma_multiply(0.6),
+                Stroke::new(1.0, line),
+            ));
+            for k in 0..3 {
+                let y = 0.35 + 0.2 * k as f32;
+                p.line_segment([at(0.2, y), at(0.8, y)], Stroke::new(1.0, col(k)));
+            }
+        }
+        "Hierarchy" => {
+            p.line_segment([at(0.5, 0.3), at(0.5, 0.45)], thin);
+            p.line_segment([at(0.2, 0.45), at(0.8, 0.45)], thin);
+            block(0.35, 0.08, 0.65, 0.3, 0, 3.0);
+            for (k, x) in [0.05, 0.55].into_iter().enumerate() {
+                p.line_segment([at(x + 0.15, 0.45), at(x + 0.15, 0.55)], thin);
+                block(x, 0.55, x + 0.4, 0.72, k + 1, 3.0);
+                block(x + 0.1, 0.78, x + 0.4, 0.92, k + 1, 3.0);
+            }
+        }
+        "Cycle" => {
+            p.circle_stroke(c, s * 0.34, Stroke::new(2.0, col(0).gamma_multiply(0.5)));
+            for k in 0..4 {
+                let a = (-90.0 + 90.0 * k as f32).to_radians();
+                let q = c + vec2(a.cos(), a.sin()) * s * 0.34;
+                p.rect_filled(Rect::from_center_size(q, vec2(s * 0.24, s * 0.14)), 2.0, col(k));
+            }
+        }
+        "Relationship" => {
+            for k in 0..3 {
+                p.circle_filled(at(0.2 + 0.3 * k as f32, 0.5), s * 0.16, col(k).gamma_multiply(0.7));
+            }
+            p.line_segment([at(0.05, 0.85), at(0.95, 0.85)], thin);
+        }
+        "Process" => {
+            for k in 0..3 {
+                let x = 0.02 + 0.33 * k as f32;
+                p.add(egui::Shape::convex_polygon(
+                    vec![at(x, 0.38), at(x + 0.24, 0.38), at(x + 0.31, 0.5), at(x + 0.24, 0.62), at(x, 0.62)],
+                    col(k),
+                    Stroke::NONE,
+                ));
+            }
+        }
+        _ => {
+            for k in 0..3 {
+                let y = 0.1 + 0.3 * k as f32;
+                block(0.1, y, 0.9, y + 0.22, k, 3.0);
             }
         }
     }
