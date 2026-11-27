@@ -258,6 +258,30 @@ fn parts_come_in_schema_order() {
 }
 
 #[test]
+fn turned_shapes_turn_their_text_back_upright() {
+    // Inverted pyramid layers are turned 180°, the down-pointing chevrons 90°: their text frames
+    // turn back by the same angle, so a reader that adds the two (PowerPoint, lily-slides) keeps
+    // the words upright, as WordCraft reads them.
+    for layout in [SmartArtLayout::PyramidInverted, SmartArtLayout::PyramidSegmented, SmartArtLayout::ChevronList] {
+        let d = parse(&drawing_xml(&SmartArtSpec::sample(layout), &THEME_COLORS, 400.0, 240.0));
+        let mut turned = 0;
+        for sp in d.child("dsp:spTree").unwrap().children("dsp:sp") {
+            let rot = sp.child("dsp:spPr").and_then(|p| p.child("a:xfrm")).and_then(|x| x.attr("rot")).map(str::to_owned);
+            let tx = sp.child("dsp:txXfrm").and_then(|t| t.attr("rot")).map(str::to_owned);
+            match (rot, sp.child("dsp:txXfrm")) {
+                (Some(r), Some(_)) => {
+                    turned += 1;
+                    assert_eq!(tx, Some(format!("-{r}")), "{layout:?}");
+                }
+                (None, Some(_)) => assert_eq!(tx, None, "{layout:?}"),
+                _ => {}
+            }
+        }
+        assert!(turned > 0, "{layout:?}");
+    }
+}
+
+#[test]
 fn hostile_sizes_and_many_items_stay_finite() {
     let spec = SmartArtSpec { items: (0..MAX_ITEMS).map(|i| SmartArtItem::new("word ".repeat(50), (i % 9) as u8)).collect(), ..Default::default() }
         .sanitized();

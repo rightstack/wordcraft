@@ -540,7 +540,12 @@ fn shape_xml(x: &mut W, sh: &Sh, id: &str, sizes: Sizes) {
             x.close("a:p");
         }
         x.close("dsp:txBody");
-        x.open("dsp:txXfrm", &[]);
+        // The text box is upright on the page (it is read that way, `read::diagram`). A turned shape
+        // (inverted pyramid layers, the down-pointing chevrons) turns its text with it unless the
+        // text frame turns back: `dsp:txXfrm@rot` adds to the shape's `rot`, as PowerPoint writes it.
+        let back = if sh.rot != 0.0 { format!("-{rot}") } else { String::new() };
+        let tx_attrs: Vec<(&str, &str)> = if back.is_empty() { Vec::new() } else { vec![("rot", &back)] };
+        x.open("dsp:txXfrm", &tx_attrs);
         x.empty("a:off", &[("x", &emu(sh.tb[0])), ("y", &emu(sh.tb[1]))]);
         x.empty("a:ext", &[("cx", &emu(sh.tb[2].max(0.0))), ("cy", &emu(sh.tb[3].max(0.0)))]);
         x.close("dsp:txXfrm");
