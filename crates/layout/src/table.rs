@@ -1287,6 +1287,17 @@ fn region_of(t: &Table, style: Option<&TableStyleProps>, ri: usize, g: usize, sp
     PartSet::of_cell(&t.props.look, (rows, cols), (ri, t.rows.len()), (g, span, ncols))
 }
 
+/// [lily] The character formatting the table style gives the text of cell `cell` of row `row`
+/// (its conditional parts — header row, first column, bands — applied), for what the ribbon shows
+/// at a caret in the cell: it sits between the document defaults and the paragraph's style, as in
+/// the layout (`StyleSheet::resolve_char_in`). `None` when the table has no style or no such cell.
+pub fn cell_style_chr(doc: &wordcraft_doc::Document, t: &Table, row: usize, cell: usize) -> Option<wordcraft_doc::CharProps> {
+    let style = doc.styles.table_style(t.props.style.as_deref()?)?;
+    let c = t.rows.get(row)?.cells.get(cell)?;
+    let region = region_of(t, Some(&style), row, t.grid_col(row, cell), c.span(), t.cols());
+    Some(region_text(&style, region).chr)
+}
+
 /// The table style's text formatting in `region`: each part's character formatting and paragraph
 /// alignment over the last, lowest precedence first (ECMA-376 §17.7.6).
 fn region_text(st: &TableStyleProps, region: Region) -> CellText {

@@ -12369,3 +12369,24 @@ fn radar_gradient_is_a_style_setting() {
     assert_eq!(first_chart(&back), Some(c));
     assert!(matches!(s.run("chart.style", &json!({"radarGradient": "yes"})), Err(crate::CmdError::Params(_))));
 }
+
+/// [lily] The ribbon's font state at a caret in a styled table includes the table style's
+/// character formatting (whole-table size, header row bold), as the layout draws it.
+#[test]
+fn lily_font_state_in_a_table_takes_the_table_style_text() {
+    let mut s = s();
+    run(&mut s, "insert.table", json!({"rows": 2, "cols": 2}));
+    run(&mut s, "text.insert", json!({"text": "Head"}));
+    run(&mut s, "table.newStyle", json!({"name": "Eleven", "wholeTable": {"size": 11}, "headerRow": {"bold": true}}));
+    run(&mut s, "table.look", json!({"headerRow": true}));
+    let st = crate::cmd::format::state(&s);
+    assert_eq!((st["size"].clone(), st["bold"].clone()), (json!(11.0), json!(true)), "{st}");
+    // a body cell: the size, not the header row's bold
+    run(&mut s, "caret.down", json!({}));
+    let st = crate::cmd::format::state(&s);
+    assert_eq!((st["size"].clone(), st["bold"].clone()), (json!(11.0), json!(false)), "{st}");
+    // direct formatting still wins
+    run(&mut s, "format.size", json!({"size": 20}));
+    run(&mut s, "text.insert", json!({"text": "Big"}));
+    assert_eq!(crate::cmd::format::state(&s)["size"], json!(20.0));
+}

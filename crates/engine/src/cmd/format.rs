@@ -248,6 +248,17 @@ fn apply_to(s: &mut Session, target: fn(&Session) -> Option<(Pos, Pos)>, f: &dyn
 
 /// Resolved target formatting, sampled up to a paragraph/column-row boundary after 10,000 runs.
 /// Empty targets use pending caret formatting or the selected text box paragraph mark.
+/// [lily] `c` resolved in the paragraph at `path` (style `style`): a paragraph in a table cell also
+/// takes the table style's character formatting for that cell (header row bold, the style's text
+/// size…), as the layout draws it — without it the ribbon showed the body size in a styled table.
+fn resolve_in(s: &Session, story: wordcraft_doc::StoryRef, path: &wordcraft_doc::Path, style: Option<&str>, c: &CharProps) -> ResolvedChar {
+    let table = path.cell().and_then(|(tp, r, cc)| s.doc.table(story, &tp).and_then(|t| wordcraft_layout::cell_style_chr(&s.doc, t, r, cc)));
+    match table {
+        Some(t) => s.doc.styles.resolve_char_in(style, Some(&t), c),
+        None => s.doc.styles.resolve_char(style, c),
+    }
+}
+
 fn resolved(s: &Session) -> Vec<ResolvedChar> {
     let mut out = Vec::new();
     if let Some(rows) = column_rows(s) {
@@ -255,11 +266,11 @@ fn resolved(s: &Session) -> Vec<ResolvedChar> {
             let Some(p) = s.doc.para_at(&a) else { continue };
             // An empty cell: its mark's formatting.
             if a == b {
-                out.push(s.doc.styles.resolve_char(p.props.style.as_deref(), &p.mark));
+                out.push(resolve_in(s, a.story, &a.path, p.props.style.as_deref(), &p.mark));
             }
             for (r, c) in p.run_ranges() {
                 if r.end > a.off && r.start < b.off {
-                    out.push(s.doc.styles.resolve_char(p.props.style.as_deref(), c));
+                    out.push(resolve_in(s, a.story, &a.path, p.props.style.as_deref(), c));
                 }
             }
             if out.len() > 10_000 {
@@ -273,7 +284,7 @@ fn resolved(s: &Session) -> Vec<ResolvedChar> {
     let Some((a, b)) = selected_text_box(s).or_else(|| target(s)) else {
         let f = &s.sel.focus;
         let style = s.doc.para_at(f).and_then(|p| p.props.style.clone());
-        out.push(s.doc.styles.resolve_char(style.as_deref(), &s.typing_props()));
+        out.push(resolve_in(s, f.story, &f.path, style.as_deref(), &s.typing_props()));
         return out;
     };
     for path in s.doc.paths_between(&a, &b) {
@@ -282,7 +293,7 @@ fn resolved(s: &Session) -> Vec<ResolvedChar> {
         let to = if path == b.path { b.off } else { p.len() };
         for (r, c) in p.run_ranges() {
             if r.end > from && r.start < to {
-                out.push(s.doc.styles.resolve_char(p.props.style.as_deref(), c));
+                out.push(resolve_in(s, a.story, &path, p.props.style.as_deref(), c));
             }
         }
         if out.len() > 10_000 {
@@ -294,7 +305,7 @@ fn resolved(s: &Session) -> Vec<ResolvedChar> {
         let style = p.and_then(|p| p.props.style.clone());
         // An empty selected text box has only its paragraph mark, which is what gets formatted.
         let empty_box = selected_text_box(s).and(p).map(|p| &p.mark);
-        out.push(s.doc.styles.resolve_char(style.as_deref(), empty_box.unwrap_or(&s.typing_props())));
+        out.push(resolve_in(s, a.story, &a.path, style.as_deref(), empty_box.unwrap_or(&s.typing_props())));
     }
     out
 }
